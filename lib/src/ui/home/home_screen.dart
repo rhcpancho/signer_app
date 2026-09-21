@@ -9,6 +9,7 @@ import '../../models/signature_placement.dart';
 import '../../services/file_service.dart';
 import '../../services/pdf_signer_service.dart';
 import '../../services/signature_setup.dart';
+import '../verificar_firma_page.dart';
 import 'pdf_session.dart';
 import 'pdf_viewer_area.dart';
 import 'signing_banner.dart';
@@ -58,6 +59,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       case 'verify':
                         _verify();
                         break;
+                      case 'verifyCurrent':
+                        _verifyCurrent();
+                        break;
                     }
                   },
                   itemBuilder: (BuildContext context) =>
@@ -69,6 +73,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     const PopupMenuItem<String>(
                       value: 'verify',
                       child: Text('Verificar firma'),
+                    ),
+                    const PopupMenuItem<String>(
+                      value: 'verifyCurrent',
+                      child: Text('Verificar documento abierto'),
                     ),
                   ],
                 ),
@@ -109,6 +117,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   )
                 : const Icon(Icons.layers_outlined),
             label: Text(_batchBusy ? 'Procesando...' : 'Firmar por lote'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _verifyBusy ? null : _verify,
+            icon: _verifyBusy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.check_circle_outline),
+            label: Text(_verifyBusy ? 'Verificando...' : 'Verificar firma'),
           ),
         ],
       ),
@@ -492,7 +512,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       final PdfSignatureDetailReport report =
           await PdfSignerService().inspectSignatureDetails(picked.bytes);
       if (!mounted) return;
-      await _showSignatureReport(report);
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => VerificarFirmaPage(
+            report: report,
+            fileName: picked.path.split(RegExp(r'[\\/]')).last,
+            outputPath: picked.path,
+          ),
+        ),
+      );
     } catch (e) {
       if (mounted) _showSnack('No se pudo verificar: $e');
     } finally {
@@ -500,73 +528,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
-  Future<void> _showSignatureReport(PdfSignatureDetailReport report) {
-    return showDialog<void>(
-      context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: const Text('Verificación de firmas'),
-        content: SizedBox(
-          width: 520,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              SelectableText(
-                'Firmadas: ${report.signed} | Pendientes: ${report.pending}',
-              ),
-              const SizedBox(height: 12),
-              const Divider(height: 1),
-              const SizedBox(height: 4),
-              if (report.fields.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(8),
-                  child: Text('No se encontraron campos de firma.'),
-                )
-              else
-                Flexible(
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: <Widget>[
-                      for (final PdfSignatureFieldInfo field in report.fields)
-                        ListTile(
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                          leading: Icon(
-                            field.hasSignature
-                                ? Icons.verified
-                                : Icons.edit_outlined,
-                            color: field.hasSignature
-                                ? Colors.green
-                                : Colors.orange,
-                          ),
-                          title: Text(field.name ?? 'Firma (sin nombre)'),
-                          subtitle: Text(
-                            field.hasSignature
-                                ? (field.signedDate != null
-                                    ? 'Firmada el ${field.signedDate}'
-                                    : 'Firmada')
-                                : 'Pendiente',
-                          ),
-                          trailing: Text(
-                            field.pageIndex == null
-                                ? '—'
-                                : 'Pag. ${field.pageIndex! + 1}',
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-            ],
+  Future<void> _verifyCurrent() async {
+    final PdfSession? session = ref.read(pdfSessionProvider);
+    if (session == null) return;
+
+    setState(() => _verifyBusy = true);
+    try {
+      final PdfSignatureDetailReport report =
+          await PdfSignerService().inspectSignatureDetails(
+        session.sourceBytes,
+        openPassword: session.openPassword,
+      );
+      if (!mounted) return;
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => VerificarFirmaPage(
+            report: report,
+            fileName: session.sourcePath.split(RegExp(r'[\\/]')).last,
+            outputPath: session.sourcePath,
           ),
         ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cerrar'),
-          ),
-        ],
-      ),
-    );
+      );
+    } catch (e) {
+      if (mounted) _showSnack('No se pudo verificar: $e');
+    } finally {
+      if (mounted) setState(() => _verifyBusy = false);
+    }
   }
 
   void _showSnack(String message) {

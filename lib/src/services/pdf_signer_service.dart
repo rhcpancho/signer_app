@@ -37,12 +37,44 @@ class PdfSignatureFieldInfo {
     required this.pageIndex,
     required this.hasSignature,
     this.signedDate,
+    this.signedName,
+    this.reason,
+    this.locationInfo,
+    this.certSubject,
+    this.certIssuer,
+    this.certValidFrom,
+    this.certValidTo,
+    this.digestAlgorithm,
   });
 
   final String? name;
   final int? pageIndex;
   final bool hasSignature;
   final DateTime? signedDate;
+
+  /// Nombre del firmante en la firma.
+  final String? signedName;
+
+  /// Motivo de la firma.
+  final String? reason;
+
+  /// Lugar de la firma.
+  final String? locationInfo;
+
+  /// Subject (CN) del certificado X.509.
+  final String? certSubject;
+
+  /// Emisor del certificado.
+  final String? certIssuer;
+
+  /// Fecha de inicio de validez del certificado.
+  final DateTime? certValidFrom;
+
+  /// Fecha de expiración del certificado.
+  final DateTime? certValidTo;
+
+  /// Algoritmo de digest (SHA256, SHA384...).
+  final String? digestAlgorithm;
 }
 
 /// Detalle por campo de la verificación de firmas de un PDF.
@@ -376,6 +408,14 @@ class PdfSignerService {
             pageIndex: pageIndex,
             hasSignature: hasSignature,
             signedDate: signature?.signedDate,
+            signedName: signature?.signedName,
+            reason: signature?.reason,
+            locationInfo: signature?.locationInfo,
+            certSubject: signature?.certificate?.subjectName,
+            certIssuer: signature?.certificate?.issuerName,
+            certValidFrom: signature?.certificate?.validFrom,
+            certValidTo: signature?.certificate?.validTo,
+            digestAlgorithm: signature?.digestAlgorithm.name,
           ));        }
       }
       return PdfSignatureDetailReport(
