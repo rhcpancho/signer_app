@@ -45,6 +45,7 @@ class PdfSignatureFieldInfo {
     this.certValidFrom,
     this.certValidTo,
     this.digestAlgorithm,
+    this.bounds,
   });
 
   final String? name;
@@ -75,6 +76,9 @@ class PdfSignatureFieldInfo {
 
   /// Algoritmo de digest (SHA256, SHA384...).
   final String? digestAlgorithm;
+
+  /// Rectángulo del campo de firma en puntos PDF (para resaltado).
+  final Rect? bounds;
 }
 
 /// Detalle por campo de la verificación de firmas de un PDF.
@@ -416,6 +420,7 @@ class PdfSignerService {
             certValidFrom: signature?.certificate?.validFrom,
             certValidTo: signature?.certificate?.validTo,
             digestAlgorithm: signature?.digestAlgorithm.name,
+            bounds: field.bounds,
           ));        }
       }
       return PdfSignatureDetailReport(

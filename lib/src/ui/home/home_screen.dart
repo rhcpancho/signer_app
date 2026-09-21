@@ -516,6 +516,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         MaterialPageRoute(
           builder: (_) => VerificarFirmaPage(
             report: report,
+            sourceBytes: picked.bytes,
             fileName: picked.path.split(RegExp(r'[\\/]')).last,
             outputPath: picked.path,
           ),
@@ -544,6 +545,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         MaterialPageRoute(
           builder: (_) => VerificarFirmaPage(
             report: report,
+            sourceBytes: session.sourceBytes,
             fileName: session.sourcePath.split(RegExp(r'[\\/]')).last,
             outputPath: session.sourcePath,
           ),
