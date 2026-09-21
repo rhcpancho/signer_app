@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../../models/signature_placement.dart';
@@ -15,6 +17,9 @@ class SignatureOverlayItem extends StatefulWidget {
     required this.pageSizeInPoints,
     required this.onChanged,
     required this.onRemove,
+    this.profileName,
+    this.hasRubric = false,
+    this.rubricBytes,
   });
 
   final SignaturePlacement placement;
@@ -23,6 +28,9 @@ class SignatureOverlayItem extends StatefulWidget {
   final Size pageSizeInPoints;
   final ValueChanged<Rect> onChanged;
   final VoidCallback onRemove;
+  final String? profileName;
+  final bool hasRubric;
+  final Uint8List? rubricBytes;
 
   @override
   State<SignatureOverlayItem> createState() => _SignatureOverlayItemState();
@@ -100,34 +108,7 @@ class _SignatureOverlayItemState extends State<SignatureOverlayItem> {
               children: <Widget>[
                 Positioned.fill(
                   child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        Icon(
-                          signed ? Icons.verified : Icons.draw,
-                          size: 22,
-                          color: borderColor,
-                        ),
-                        if (!signed)
-                          Text(
-                            'Firma',
-                            style: TextStyle(
-                              color: borderColor,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          )
-                        else
-                          Text(
-                            'Firmada',
-                            style: TextStyle(
-                              color: Colors.green.shade700,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                      ],
-                    ),
+                    child: _buildPreview(borderColor, signed),
                   ),
                 ),
                 if (interactive)
@@ -179,6 +160,55 @@ class _SignatureOverlayItemState extends State<SignatureOverlayItem> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildPreview(Color borderColor, bool signed) {
+    if (signed) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(Icons.verified, size: 22, color: borderColor),
+          Text(
+            'Firmada',
+            style: TextStyle(
+              color: Colors.green.shade700,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (widget.hasRubric && widget.rubricBytes != null && widget.rubricBytes!.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(2),
+        child: FittedBox(
+          fit: BoxFit.contain,
+          child: Image.memory(
+            widget.rubricBytes!,
+            fit: BoxFit.contain,
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Icon(Icons.draw, size: 22, color: borderColor),
+        Text(
+          widget.profileName ?? 'Firma',
+          style: TextStyle(
+            color: borderColor,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
+          textAlign: TextAlign.center,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ],
     );
   }
 }

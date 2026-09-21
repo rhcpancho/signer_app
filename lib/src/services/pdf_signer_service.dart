@@ -445,12 +445,5 @@ class PdfSignerService {
     return output;
   }
 
-  /// Guarda el PDF firmado junto al original como `X_firmado.pdf` y lo abre.
-  Future<File> saveAndOpen(Uint8List bytes, String sourcePath) async {
-    final File output = await save(bytes, sourcePath);
-    await open(output);
-    return output;
-  }
-
   Future<void> open(File file) => OpenFilex.open(file.path);
 }

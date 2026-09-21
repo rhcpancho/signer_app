@@ -11,6 +11,7 @@ import '../../services/pdf_signer_service.dart';
 import '../../services/signature_setup.dart';
 import 'pdf_session.dart';
 import 'pdf_viewer_area.dart';
+import 'signing_banner.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -30,7 +31,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final PdfSession? session = ref.watch(pdfSessionProvider);
-    final bool signMode = ref.watch(signModeProvider);
 
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
@@ -39,16 +39,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         actions: session == null
             ? null
             : <Widget>[
-                IconButton(
-                  tooltip: signMode
-                      ? 'Terminar de colocar firmas'
-                      : 'Colocar firma',
-                  onPressed: () =>
-                      ref.read(signModeProvider.notifier).state = !signMode,
-                  icon: Icon(
-                    signMode ? Icons.draw : Icons.draw_outlined,
-                  ),
-                ),
                 PopupMenuButton<String>(
                   onSelected: (String value) {
                     switch (value) {
@@ -89,14 +79,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           const SizedBox(height: 16),
           FilledButton.icon(
             onPressed: _opening ? null : _openPdf,
-            icon: const Icon(Icons.folder_open),
-            label: const Text('Abrir PDF'),
+            icon: _opening
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.folder_open),
+            label: Text(_opening ? 'Abriendo...' : 'Abrir PDF'),
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
             onPressed: _batchBusy ? null : _signBatch,
-            icon: const Icon(Icons.layers_outlined),
-            label: const Text('Firmar por lote'),
+            icon: _batchBusy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.layers_outlined),
+            label: Text(_batchBusy ? 'Procesando...' : 'Firmar por lote'),
           ),
         ],
       ),
@@ -106,6 +108,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget _buildViewer() {
     return Column(
       children: <Widget>[
+        SigningBanner(
+          onChangeProfile: _changeProfile,
+          onSignAndSave: _confirmSign,
+        ),
         Expanded(child: PdfViewerArea(key: _viewerKey)),
         _buildBottomBar(),
       ],
@@ -114,6 +120,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Widget _buildBottomBar() {
     final PdfSession? session = ref.read(pdfSessionProvider);
+    final ActiveSignContext? ctx = ref.read(activeSignContextProvider);
     return Material(
       color: Theme.of(context).colorScheme.surfaceVariant,
       child: SafeArea(
@@ -124,21 +131,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             children: <Widget>[
               IconButton(
                 icon: const Icon(Icons.skip_previous),
-                tooltip: 'Pagina anterior',
+                tooltip: 'Página anterior',
                 onPressed: session == null
                     ? null
                     : () => _viewerKey.currentState?.prevPage(),
               ),
               IconButton(
                 icon: const Icon(Icons.skip_next),
-                tooltip: 'Pagina siguiente',
+                tooltip: 'Página siguiente',
                 onPressed: session == null
                     ? null
                     : () => _viewerKey.currentState?.nextPage(),
               ),
               Expanded(
                 child: Text(
-                  'Pagina ${(_viewerKey.currentState?.currentPage ?? 0) + 1}',
+                  'Página ${(_viewerKey.currentState?.currentPage ?? 0) + 1} de ${session?.pageCount ?? 1}',
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -159,8 +166,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               const SizedBox(width: 4),
               FilledButton.icon(
                 onPressed: session == null || _signing ? null : _startSign,
-                icon: const Icon(Icons.draw),
-                label: const Text('Firmar'),
+                icon: _signing
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(ctx != null ? Icons.check_circle_outline : Icons.draw),
+                label: Text(
+                  ctx != null
+                      ? 'Firmar y guardar'
+                      : (_signing ? 'Firmando...' : 'Firmar'),
+                ),
               ),
             ],
           ),
@@ -191,30 +208,94 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final PdfSession? session = ref.read(pdfSessionProvider);
     if (session == null) return;
 
-    if (session.placements.isEmpty) {
-      _showSnack('Coloca primero una firma tocando sobre el PDF.');
-      ref.read(signModeProvider.notifier).state = true;
+    final ActiveSignContext? ctx = ref.read(activeSignContextProvider);
+
+    if (ctx == null) {
+      final SignSetup? setup = await showSignSetupDialog(context);
+      if (setup == null || !mounted) return;
+      ref.read(activeSignContextProvider.notifier).state = ActiveSignContext(
+        profile: setup.profile,
+        password: setup.password ?? '',
+      );
+      _showSnack('Toca la página para colocar la firma.');
       return;
     }
 
+    await _confirmSign();
+  }
+
+  Future<void> _changeProfile() async {
     final SignSetup? setup = await showSignSetupDialog(context);
     if (setup == null || !mounted) return;
+    ref.read(activeSignContextProvider.notifier).state = ActiveSignContext(
+      profile: setup.profile,
+      password: setup.password ?? '',
+    );
+  }
+
+  Future<void> _confirmSign() async {
+    final PdfSession? session = ref.read(pdfSessionProvider);
+    final ActiveSignContext? ctx = ref.read(activeSignContextProvider);
+    if (session == null || ctx == null) return;
+
+    final List<SignaturePlacement> pending =
+        session.placements.where((p) => !p.signed).toList();
+
+    if (pending.isEmpty) {
+      _showSnack('Coloca primero una firma tocando sobre el PDF.');
+      return;
+    }
+
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('Confirmar firma'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Vas a firmar ${pending.length} zona${pending.length == 1 ? '' : 's'} '
+              'en este PDF con \u00AB${ctx.profile.name}\u00BB.',
+            ),
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+            const SizedBox(height: 8),
+            for (final SignaturePlacement p in pending)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  '\u2022 Página ${p.pageIndex + 1}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Firmar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
 
     setState(() => _signing = true);
     try {
       final List<SignRequest> requests = <SignRequest>[
-        for (final SignaturePlacement placement in session.placements)
-          if (!placement.signed)
-            SignRequest(
-              placement: placement,
-              profile: setup.profile,
-              certificatePassword: setup.password,
-            ),
+        for (final SignaturePlacement p in pending)
+          SignRequest(
+            placement: p,
+            profile: ctx.profile,
+            certificatePassword: ctx.password,
+          ),
       ];
-      if (requests.isEmpty) {
-        _showSnack('No hay firmas pendientes por aplicar.');
-        return;
-      }
 
       final PdfSignerService service = PdfSignerService();
       final Uint8List bytes = await service.sign(
@@ -222,19 +303,86 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         requests: requests,
         openPassword: session.openPassword,
       );
-      final File output = await service.saveAndOpen(
+      final File output = await service.save(
         bytes,
         session.sourcePath,
       );
-      final String signedPath = output.path;
       ref.read(pdfSessionProvider.notifier).markAllSigned();
       if (!mounted) return;
-      _showSnack('PDF firmado y guardado en $signedPath');
+      await _showSignSummary(
+        output: output,
+        count: pending.length,
+        profileName: ctx.profile.name,
+        signedPlacements: pending,
+      );
     } catch (e) {
       if (mounted) _showSnack('Error al firmar: $e');
     } finally {
       if (mounted) setState(() => _signing = false);
     }
+  }
+
+  Future<void> _showSignSummary({
+    required File output,
+    required int count,
+    required String profileName,
+    required List<SignaturePlacement> signedPlacements,
+  }) {
+    final Set<int> pages = signedPlacements.map((p) => p.pageIndex + 1).toSet()
+      ..toList().sort();
+    return showDialog<void>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        icon: const Icon(Icons.verified, size: 48, color: Colors.green),
+        title: const Text('Firma completada'),
+        content: SizedBox(
+          width: 460,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Se firmaron $count zona${count == 1 ? '' : 's'} en este PDF '
+                'con \u00AB$profileName\u00BB.',
+              ),
+              const SizedBox(height: 12),
+              const Divider(height: 1),
+              const SizedBox(height: 8),
+              Text(
+                'Páginas: ${pages.join(', ')}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Guardado en:',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 4),
+              SelectableText(
+                output.path,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontFamily: 'monospace',
+                    ),
+              ),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cerrar'),
+          ),
+          FilledButton.icon(
+            onPressed: () async {
+              await PdfSignerService().open(output);
+              if (context.mounted) Navigator.of(context).pop();
+            },
+            icon: const Icon(Icons.open_in_new),
+            label: const Text('Abrir archivo'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _signBatch() async {
@@ -301,7 +449,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return showDialog<void>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: const Text('Verificacion de firmas'),
+        title: const Text('Verificación de firmas'),
         content: SizedBox(
           width: 520,
           child: Column(

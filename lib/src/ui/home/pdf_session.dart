@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pdfrx/pdfrx.dart';
 
+import '../../models/certificate_profile.dart';
 import '../../models/signature_placement.dart';
 
 /// Sesión con un documento PDF abierto en el visor.
@@ -114,5 +115,18 @@ class PdfSessionNotifier extends Notifier<PdfSession?> {
 final pdfSessionProvider =
     NotifierProvider<PdfSessionNotifier, PdfSession?>(PdfSessionNotifier.new);
 
-/// Indica si el modo "colocar firma" está activo.
-final signModeProvider = StateProvider<bool>((ref) => false);
+/// Contexto activo de firma: certificado + contraseña en memoria por sesión.
+class ActiveSignContext {
+  const ActiveSignContext({
+    required this.profile,
+    required this.password,
+  });
+
+  final CertificateProfile profile;
+  final String password;
+}
+
+/// Estado del contexto de firma activo. null = sin modo firma.
+final activeSignContextProvider = StateProvider<ActiveSignContext?>(
+  (ref) => null,
+);
