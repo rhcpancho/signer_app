@@ -110,6 +110,12 @@ class PdfSessionNotifier extends Notifier<PdfSession?> {
     }
     ref.notifyListeners();
   }
+
+  Future<void> close() async {
+    final PdfSession? old = state;
+    state = null;
+    await old?.dispose();
+  }
 }
 
 final pdfSessionProvider =

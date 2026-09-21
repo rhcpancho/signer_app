@@ -39,6 +39,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         actions: session == null
             ? null
             : <Widget>[
+                IconButton(
+                  tooltip: 'Abrir otro PDF',
+                  onPressed: _opening ? null : _openPdf,
+                  icon: const Icon(Icons.note_add_outlined),
+                ),
+                IconButton(
+                  tooltip: 'Cerrar documento',
+                  onPressed: _closePdf,
+                  icon: const Icon(Icons.close),
+                ),
                 PopupMenuButton<String>(
                   onSelected: (String value) {
                     switch (value) {
@@ -197,6 +207,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         picked.path,
         picked.bytes,
       );
+      ref.read(activeSignContextProvider.notifier).state = null;
     } catch (e) {
       if (mounted) _showSnack('No se pudo abrir el PDF: $e');
     } finally {
@@ -231,6 +242,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       profile: setup.profile,
       password: setup.password ?? '',
     );
+  }
+
+  Future<void> _closePdf() async {
+    final PdfSession? session = ref.read(pdfSessionProvider);
+    if (session == null) return;
+
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('Cerrar documento'),
+        content: const Text(
+          '¿Cerrar el documento actual? Se descartarán las firmas '
+          'colocadas que no se hayan guardado.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+    await ref.read(pdfSessionProvider.notifier).close();
+    ref.read(activeSignContextProvider.notifier).state = null;
   }
 
   Future<void> _confirmSign() async {
@@ -370,7 +411,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cerrar'),
+            child: const Text('Listo'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _openPdf();
+            },
+            child: const Text('Abrir otro PDF'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _closePdf();
+            },
+            child: const Text('Cerrar documento'),
           ),
           FilledButton.icon(
             onPressed: () async {
