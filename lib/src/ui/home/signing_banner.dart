@@ -8,10 +8,12 @@ class SigningBanner extends ConsumerWidget {
     super.key,
     required this.onChangeProfile,
     required this.onSignAndSave,
+    required this.onCopyToPages,
   });
 
   final VoidCallback onChangeProfile;
   final VoidCallback onSignAndSave;
+  final VoidCallback onCopyToPages;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -43,6 +45,14 @@ class SigningBanner extends ConsumerWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (pending > 0) ...<Widget>[
+                TextButton.icon(
+                  onPressed: onCopyToPages,
+                  icon: const Icon(Icons.copy, size: 16),
+                  label: const Text('Copiar a otras páginas'),
+                ),
+                const SizedBox(width: 4),
+              ],
               TextButton(
                 onPressed: onChangeProfile,
                 child: const Text('Cambiar'),

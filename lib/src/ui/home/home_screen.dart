@@ -16,6 +16,7 @@ import '../verificar_firma_page.dart';
 import '../widgets/drop_zone_overlay.dart';
 import 'batch_progress_page.dart';
 import 'batch_setup_dialog.dart';
+import 'page_selector_dialog.dart';
 import 'pdf_session.dart';
 import 'pdf_viewer_area.dart';
 import 'signing_banner.dart';
@@ -161,6 +162,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         SigningBanner(
           onChangeProfile: _changeProfile,
           onSignAndSave: _confirmSign,
+          onCopyToPages: _copyPlacementToPages,
         ),
         Expanded(child: PdfViewerArea(key: _viewerKey)),
         _buildBottomBar(),
@@ -282,6 +284,41 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       profile: setup.profile,
       password: setup.password ?? '',
     );
+  }
+
+  Future<void> _copyPlacementToPages() async {
+    final PdfSession? session = ref.read(pdfSessionProvider);
+    if (session == null) return;
+
+    // Usar el último placement como referencia
+    final SignaturePlacement? last = session.placements.isNotEmpty
+        ? session.placements.last
+        : null;
+    if (last == null) {
+      _showSnack('Coloca primero una firma para poder copiarla.');
+      return;
+    }
+
+    // Páginas que ya tienen una placement (excluyendo la de referencia)
+    final Set<int> existingPages = session.placements
+        .where((p) => p != last)
+        .map((p) => p.pageIndex)
+        .toSet();
+
+    final List<int>? selectedPages = await showPageSelectorDialog(
+      context,
+      totalPages: session.pageCount,
+      initiallySelected: existingPages,
+    );
+    if (selectedPages == null || !mounted) return;
+
+    ref.read(pdfSessionProvider.notifier).addPlacementToPages(
+      selectedPages,
+      last.rect,
+      profileId: last.profileId,
+    );
+
+    _showSnack('Firma copiada a ${selectedPages.length} páginas.');
   }
 
   Future<void> _closePdf() async {

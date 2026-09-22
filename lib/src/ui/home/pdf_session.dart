@@ -79,6 +79,30 @@ class PdfSessionNotifier extends Notifier<PdfSession?> {
     ref.notifyListeners();
   }
 
+  /// Clona el mismo rect en múltiples páginas (firma multi-página).
+  /// Omite páginas que ya tengan una placement con el mismo rect.
+  void addPlacementToPages(List<int> pageIndices, Rect rectInPoints,
+      {required String profileId}) {
+    final PdfSession? session = state;
+    if (session == null) return;
+    for (final int pageIndex in pageIndices) {
+      final bool exists = session.placements.any(
+        (SignaturePlacement p) =>
+            p.pageIndex == pageIndex && p.rect == rectInPoints,
+      );
+      if (!exists) {
+        session.placements.add(
+          SignaturePlacement(
+            pageIndex: pageIndex,
+            rect: rectInPoints,
+            profileId: profileId,
+          ),
+        );
+      }
+    }
+    ref.notifyListeners();
+  }
+
   void updatePlacement(int index, Rect rectInPoints) {
     final PdfSession? session = state;
     if (session == null) return;
