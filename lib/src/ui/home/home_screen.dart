@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pdfrx/pdfrx.dart';
@@ -12,6 +13,7 @@ import '../../services/pdf_signer_service.dart';
 import '../../services/signature_setup.dart';
 import '../../core/theme_provider.dart';
 import '../verificar_firma_page.dart';
+import '../widgets/drop_zone_overlay.dart';
 import 'batch_progress_page.dart';
 import 'batch_setup_dialog.dart';
 import 'pdf_session.dart';
@@ -32,6 +34,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   bool _opening = false;
   bool _batchBusy = false;
   bool _verifyBusy = false;
+  bool _dragging = false;
 
   @override
   Widget build(BuildContext context) {
@@ -85,7 +88,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ),
               ],
       ),
-      body: session == null ? _buildEmpty(context) : _buildViewer(),
+      body: DropTarget(
+        onDragEntered: (_) {
+          if (!_dragging && mounted) setState(() => _dragging = true);
+        },
+        onDragExited: (_) {
+          if (_dragging && mounted) setState(() => _dragging = false);
+        },
+        onDragDone: (details) => _handleDrop(details),
+        child: Stack(
+          children: <Widget>[
+            session == null ? _buildEmpty(context) : _buildViewer(),
+            DropZoneOverlay(show: _dragging),
+          ],
+        ),
+      ),
     );
   }
 
@@ -599,6 +616,105 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         child: const Text('Tema del sistema'),
       ),
     ];
+  }
+
+  Future<void> _handleDrop(DropDoneDetails details) async {
+    if (!mounted) return;
+    setState(() => _dragging = false);
+
+    final List<String> paths = details.files
+        .map((file) => file.path)
+        .toList();
+    if (paths.isEmpty) return;
+
+    final List<String> pdfs = <String>[];
+    final List<String> certs = <String>[];
+    for (final String p in paths) {
+      final String lower = p.toLowerCase();
+      if (lower.endsWith('.pdf')) {
+        pdfs.add(p);
+      } else if (lower.endsWith('.pfx') || lower.endsWith('.p12')) {
+        certs.add(p);
+      }
+    }
+
+    if (pdfs.length == 1 && certs.isEmpty) {
+      await _openPdfFromPath(pdfs.first);
+    } else if (pdfs.length > 1 && certs.isEmpty) {
+      await _signBatchFromPaths(pdfs);
+    } else if (pdfs.isEmpty && certs.length == 1) {
+      await _importCertificateFromPath(certs.first);
+    } else if (pdfs.isNotEmpty) {
+      await _signBatchFromPaths(pdfs);
+    }
+  }
+
+  Future<void> _openPdfFromPath(String path) async {
+    final PickedFile? picked = await FileService.fromDroppedPath(path);
+    if (picked == null || !mounted) return;
+    setState(() => _opening = true);
+    try {
+      final PdfDocument document = await PdfDocument.openData(picked.bytes);
+      await ref.read(pdfSessionProvider.notifier).load(
+        document,
+        picked.path,
+        picked.bytes,
+      );
+      ref.read(activeSignContextProvider.notifier).state = null;
+    } catch (e) {
+      if (mounted) _showSnack('No se pudo abrir el PDF: $e');
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
+  }
+
+  Future<void> _signBatchFromPaths(List<String> paths) async {
+    if (_batchBusy) return;
+    final List<PickedFile> files = <PickedFile>[];
+    for (final String p in paths) {
+      final PickedFile? f = await FileService.fromDroppedPath(p);
+      if (f != null) files.add(f);
+    }
+    if (files.isEmpty || !mounted) return;
+
+    final SignSetup? setup = await showSignSetupDialog(context);
+    if (setup == null || !mounted) return;
+
+    final BatchSetupResult? batchSetup = await showBatchSetupDialog(
+      context,
+      pickedFiles: files,
+    );
+    if (batchSetup == null || !mounted) return;
+
+    final BatchJobConfig config = BatchJobConfig(
+      profile: setup.profile,
+      password: setup.password,
+      zone: batchSetup.zone,
+      files: batchSetup.files,
+      outputDirectory: batchSetup.outputDirectory,
+    );
+
+    setState(() => _batchBusy = true);
+    try {
+      if (!mounted) return;
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => BatchProgressPage(config: config),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _batchBusy = false);
+    }
+  }
+
+  Future<void> _importCertificateFromPath(String path) async {
+    final PickedFile? picked = await FileService.fromDroppedPath(path);
+    if (picked == null || !mounted) return;
+
+    final SignSetup? setup = await showSignSetupDialog(context);
+    if (setup == null || !mounted) return;
+
+    _showSnack('Certificado importado: ${setup.profile.name}');
   }
 
   void _showSnack(String message) {
