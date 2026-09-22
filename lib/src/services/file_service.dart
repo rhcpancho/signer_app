@@ -1,4 +1,5 @@
-﻿import 'dart:typed_data';
+﻿import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 
@@ -73,5 +74,18 @@ class FileService {
       return null;
     }
     return PickedFile(path: file.path ?? file.name, bytes: file.bytes!);
+  }
+
+  /// Selecciona un directorio del sistema.
+  Future<String?> pickDirectory() async {
+    return FilePicker.platform.getDirectoryPath();
+  }
+
+  /// Crea un [PickedFile] desde una ruta de archivo (para drag & drop).
+  static Future<PickedFile?> fromDroppedPath(String path) async {
+    final File file = File(path);
+    if (!await file.exists()) return null;
+    final Uint8List bytes = await file.readAsBytes();
+    return PickedFile(path: path, bytes: bytes);
   }
 }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pdfrx/pdfrx.dart';
 
+import '../../models/certificate_profile.dart';
 import '../../models/signature_placement.dart';
 import '../../services/signature_setup.dart';
 import '../widgets/signature_overlay_item.dart';
@@ -20,8 +21,11 @@ class PdfViewerAreaState extends ConsumerState<PdfViewerArea> {
   static const double _kMinZoom = 0.4;
   static const double _kMaxZoom = 8.0;
   static const double _kMargin = 28;
-  static const Size _kDefaultSignatureSize =
-      Size(260, 120); // puntos PDF
+  static const double _kRubricTargetHeight = 64;
+  static const double _kTextBoxHeight = 52;
+  static const double _kTextBoxPaddingX = 40;
+  static const double _kMinBoxWidth = 60;
+  static const double _kMaxBoxWidth = 220;
 
   final PageController _pageController = PageController();
   final Map<int, TransformationController> _txControllers =
@@ -99,7 +103,7 @@ class PdfViewerAreaState extends ConsumerState<PdfViewerArea> {
   @override
   Widget build(BuildContext context) {
     final PdfSession? session = ref.watch(pdfSessionProvider);
-    final bool signMode = ref.watch(signModeProvider);
+    final ActiveSignContext? signCtx = ref.watch(activeSignContextProvider);
 
     if (session == null) {
       return const _NoDocumentView();
@@ -157,7 +161,7 @@ class PdfViewerAreaState extends ConsumerState<PdfViewerArea> {
                                   ),
                                 ),
                               ),
-                              if (signMode)
+                              if (signCtx != null)
                                 Positioned.fill(
                                   child: GestureDetector(
                                     behavior: HitTestBehavior.opaque,
@@ -166,6 +170,7 @@ class PdfViewerAreaState extends ConsumerState<PdfViewerArea> {
                                       details.localPosition,
                                       page,
                                       pageSize,
+                                      signCtx,
                                     ),
                                   ),
                                 ),
@@ -207,10 +212,15 @@ class PdfViewerAreaState extends ConsumerState<PdfViewerArea> {
     required double scale,
     required PdfSession session,
   }) {
+    final List<CertificateProfile> profiles =
+        ref.read(certificateProfilesProvider).value ?? <CertificateProfile>[];
     final List<Widget> widgets = <Widget>[];
     for (int i = 0; i < session.placements.length; i++) {
       final SignaturePlacement placement = session.placements[i];
       if (placement.pageIndex != pageIndex) continue;
+      final CertificateProfile? profile = profiles
+          .where((p) => p.id == placement.profileId)
+          .firstOrNull;
       widgets.add(
         SignatureOverlayItem(
           key: ValueKey<int>(i),
@@ -221,6 +231,9 @@ class PdfViewerAreaState extends ConsumerState<PdfViewerArea> {
             session.document.pages[pageIndex].width,
             session.document.pages[pageIndex].height,
           ),
+          profileName: profile?.name,
+          hasRubric: profile?.hasRubric ?? false,
+          rubricBytes: profile?.signatureBytes,
           onChanged: (Rect rect) =>
               ref.read(pdfSessionProvider.notifier).updatePlacement(i, rect),
           onRemove: () =>
@@ -235,34 +248,63 @@ class PdfViewerAreaState extends ConsumerState<PdfViewerArea> {
     Offset localPosition,
     PdfPage page,
     ui.Size pageSize,
+    ActiveSignContext signCtx,
   ) async {
-    if (ref.read(signModeProvider) == false) {
-      return;
-    }
-
-    final SignSetup? setup = await showSignSetupDialog(context);
-    if (setup == null || !mounted) {
-      return;
-    }
-
+    final Size boxSize = await _signatureSizeForProfile(signCtx.profile);
     final double scale = pageSize.width / page.width;
     final double left =
-        (localPosition.dx / scale - _kDefaultSignatureSize.width / 2)
-            .clamp(0.0, page.width - _kDefaultSignatureSize.width);
+        (localPosition.dx / scale - boxSize.width / 2)
+            .clamp(0.0, page.width - boxSize.width);
     final double top =
-        (localPosition.dy / scale - _kDefaultSignatureSize.height / 2)
-            .clamp(0.0, page.height - _kDefaultSignatureSize.height);
+        (localPosition.dy / scale - boxSize.height / 2)
+            .clamp(0.0, page.height - boxSize.height);
 
     ref.read(pdfSessionProvider.notifier).addPlacement(
           _page,
-          Rect.fromLTWH(
-            left,
-            top,
-            _kDefaultSignatureSize.width,
-            _kDefaultSignatureSize.height,
-          ),
-          profileId: setup.profile.id,
+          Rect.fromLTWH(left, top, boxSize.width, boxSize.height),
+          profileId: signCtx.profile.id,
         );
+  }
+
+  static Future<ui.Size> _signatureSizeForProfile(
+    CertificateProfile profile,
+  ) async {
+    if (profile.hasRubric &&
+        profile.signatureBytes.isNotEmpty) {
+      final ui.Codec codec =
+          await ui.instantiateImageCodec(profile.signatureBytes);
+      final ui.FrameInfo frame = await codec.getNextFrame();
+      final int imgW = frame.image.width;
+      final int imgH = frame.image.height;
+      frame.image.dispose();
+      if (imgH > 0) {
+        final double width =
+            (_kRubricTargetHeight * imgW / imgH)
+                .clamp(_kMinBoxWidth, _kMaxBoxWidth);
+        return ui.Size(width, _kRubricTargetHeight);
+      }
+    }
+
+    final String name =
+        profile.name.isNotEmpty ? profile.name : 'Firma';
+    final TextPainter painter = TextPainter(
+      text: TextSpan(
+        text: name,
+        style: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    );
+    painter.layout();
+    final double textWidth = painter.width;
+    painter.dispose();
+
+    final double width =
+        (textWidth + _kTextBoxPaddingX)
+            .clamp(_kMinBoxWidth, _kMaxBoxWidth);
+    return ui.Size(width, _kTextBoxHeight);
   }
 }
 

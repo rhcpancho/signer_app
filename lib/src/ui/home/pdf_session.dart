@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pdfrx/pdfrx.dart';
 
+import '../../models/certificate_profile.dart';
 import '../../models/signature_placement.dart';
 
 /// Sesión con un documento PDF abierto en el visor.
@@ -78,6 +79,30 @@ class PdfSessionNotifier extends Notifier<PdfSession?> {
     ref.notifyListeners();
   }
 
+  /// Clona el mismo rect en múltiples páginas (firma multi-página).
+  /// Omite páginas que ya tengan una placement con el mismo rect.
+  void addPlacementToPages(List<int> pageIndices, Rect rectInPoints,
+      {required String profileId}) {
+    final PdfSession? session = state;
+    if (session == null) return;
+    for (final int pageIndex in pageIndices) {
+      final bool exists = session.placements.any(
+        (SignaturePlacement p) =>
+            p.pageIndex == pageIndex && p.rect == rectInPoints,
+      );
+      if (!exists) {
+        session.placements.add(
+          SignaturePlacement(
+            pageIndex: pageIndex,
+            rect: rectInPoints,
+            profileId: profileId,
+          ),
+        );
+      }
+    }
+    ref.notifyListeners();
+  }
+
   void updatePlacement(int index, Rect rectInPoints) {
     final PdfSession? session = state;
     if (session == null) return;
@@ -109,10 +134,29 @@ class PdfSessionNotifier extends Notifier<PdfSession?> {
     }
     ref.notifyListeners();
   }
+
+  Future<void> close() async {
+    final PdfSession? old = state;
+    state = null;
+    await old?.dispose();
+  }
 }
 
 final pdfSessionProvider =
     NotifierProvider<PdfSessionNotifier, PdfSession?>(PdfSessionNotifier.new);
 
-/// Indica si el modo "colocar firma" está activo.
-final signModeProvider = StateProvider<bool>((ref) => false);
+/// Contexto activo de firma: certificado + contraseña en memoria por sesión.
+class ActiveSignContext {
+  const ActiveSignContext({
+    required this.profile,
+    required this.password,
+  });
+
+  final CertificateProfile profile;
+  final String password;
+}
+
+/// Estado del contexto de firma activo. null = sin modo firma.
+final activeSignContextProvider = StateProvider<ActiveSignContext?>(
+  (ref) => null,
+);

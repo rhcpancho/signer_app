@@ -7,8 +7,8 @@ void main() {
       (WidgetTester tester) async {
     await tester.pumpWidget(const ProviderScope(child: SignerApp()));
 
-    expect(find.text('Signer App'), findsOneWidget);
+    expect(find.text('Signer App — Firma de PDFs'), findsOneWidget);
     expect(find.text('Abrir PDF'), findsOneWidget);
-    expect(find.text('Sin documento cargado'), findsOneWidget);
+    expect(find.text('No hay un PDF abierto'), findsOneWidget);
   });
 }

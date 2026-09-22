@@ -6,6 +6,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
+import '../models/batch_job.dart';
 import '../models/certificate_profile.dart';
 import '../models/signature_placement.dart';
 
@@ -37,12 +38,48 @@ class PdfSignatureFieldInfo {
     required this.pageIndex,
     required this.hasSignature,
     this.signedDate,
+    this.signedName,
+    this.reason,
+    this.locationInfo,
+    this.certSubject,
+    this.certIssuer,
+    this.certValidFrom,
+    this.certValidTo,
+    this.digestAlgorithm,
+    this.bounds,
   });
 
   final String? name;
   final int? pageIndex;
   final bool hasSignature;
   final DateTime? signedDate;
+
+  /// Nombre del firmante en la firma.
+  final String? signedName;
+
+  /// Motivo de la firma.
+  final String? reason;
+
+  /// Lugar de la firma.
+  final String? locationInfo;
+
+  /// Subject (CN) del certificado X.509.
+  final String? certSubject;
+
+  /// Emisor del certificado.
+  final String? certIssuer;
+
+  /// Fecha de inicio de validez del certificado.
+  final DateTime? certValidFrom;
+
+  /// Fecha de expiración del certificado.
+  final DateTime? certValidTo;
+
+  /// Algoritmo de digest (SHA256, SHA384...).
+  final String? digestAlgorithm;
+
+  /// Rectángulo del campo de firma en puntos PDF (para resaltado).
+  final Rect? bounds;
 }
 
 /// Detalle por campo de la verificación de firmas de un PDF.
@@ -376,6 +413,15 @@ class PdfSignerService {
             pageIndex: pageIndex,
             hasSignature: hasSignature,
             signedDate: signature?.signedDate,
+            signedName: signature?.signedName,
+            reason: signature?.reason,
+            locationInfo: signature?.locationInfo,
+            certSubject: signature?.certificate?.subjectName,
+            certIssuer: signature?.certificate?.issuerName,
+            certValidFrom: signature?.certificate?.validFrom,
+            certValidTo: signature?.certificate?.validTo,
+            digestAlgorithm: signature?.digestAlgorithm.name,
+            bounds: field.bounds,
           ));        }
       }
       return PdfSignatureDetailReport(
@@ -431,10 +477,72 @@ class PdfSignerService {
     }
   }
 
+  /// Calcula la colocación por defecto según la zona seleccionada para lote.
+  Future<SignaturePlacement?> defaultPlacementForZone(
+    Uint8List bytes, {
+    required String profileId,
+    required BatchPlacementZone zone,
+    String? openPassword,
+  }) async {
+    final PdfDocument document = PdfDocument(
+      inputBytes: bytes,
+      password: openPassword,
+    );
+    try {
+      if (document.pages.count == 0) return null;
+
+      const double stampWidth = 220;
+      const double stampHeight = 96;
+      const double margin = 16;
+
+      final bool useLastPage =
+          zone == BatchPlacementZone.lastPageBottomRight ||
+          zone == BatchPlacementZone.lastPageCenter;
+      final int pageIndex =
+          useLastPage ? document.pages.count - 1 : 0;
+      final PdfPage page = document.pages[pageIndex];
+      final double pageWidth = page.size.width;
+      final double pageHeight = page.size.height;
+
+      final bool center =
+          zone == BatchPlacementZone.lastPageCenter ||
+          zone == BatchPlacementZone.firstPageCenter;
+
+      final double x = center
+          ? ((pageWidth - stampWidth) / 2)
+              .clamp(0.0, pageWidth - stampWidth)
+              .toDouble()
+          : (pageWidth - stampWidth - margin)
+              .clamp(0.0, pageWidth - stampWidth)
+              .toDouble();
+
+      final double y = center
+          ? ((pageHeight - stampHeight) / 2)
+              .clamp(0.0, pageHeight - stampHeight)
+              .toDouble()
+          : (pageHeight - stampHeight - margin)
+              .clamp(0.0, pageHeight - stampHeight)
+              .toDouble();
+
+      return SignaturePlacement(
+        pageIndex: pageIndex,
+        rect: Rect.fromLTWH(
+          x,
+          y,
+          (stampWidth.clamp(0.0, pageWidth)).toDouble(),
+          (stampHeight.clamp(0.0, pageHeight)).toDouble(),
+        ),
+        profileId: profileId,
+      );
+    } finally {
+      document.dispose();
+    }
+  }
+
   /// Guarda el PDF firmado junto al original como `X_firmado.pdf`.
-  /// No abre el resultado (útil para firmas por lote).
-  Future<File> save(Uint8List bytes, String sourcePath) async {
-    final String directory = p.dirname(sourcePath);
+  /// Si se especifica [outputDirectory], guarda ahí en lugar del directorio original.
+  Future<File> save(Uint8List bytes, String sourcePath, {String? outputDirectory}) async {
+    final String directory = outputDirectory ?? p.dirname(sourcePath);
     final String base =
         sourcePath.split(RegExp(r'[\\/]')).last.toLowerCase().endsWith('.pdf')
             ? sourcePath.split(RegExp(r'[\\/]')).last.replaceFirst(RegExp(r'\.pdf$', caseSensitive: false), '')
@@ -442,13 +550,6 @@ class PdfSignerService {
 
     final File output = File(p.join(directory, '${base}_firmado.pdf'));
     await output.writeAsBytes(bytes, flush: true);
-    return output;
-  }
-
-  /// Guarda el PDF firmado junto al original como `X_firmado.pdf` y lo abre.
-  Future<File> saveAndOpen(Uint8List bytes, String sourcePath) async {
-    final File output = await save(bytes, sourcePath);
-    await open(output);
     return output;
   }
 
