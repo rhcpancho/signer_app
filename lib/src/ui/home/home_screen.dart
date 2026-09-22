@@ -10,6 +10,7 @@ import '../../models/signature_placement.dart';
 import '../../services/file_service.dart';
 import '../../services/pdf_signer_service.dart';
 import '../../services/signature_setup.dart';
+import '../../core/theme_provider.dart';
 import '../verificar_firma_page.dart';
 import 'batch_progress_page.dart';
 import 'batch_setup_dialog.dart';
@@ -35,13 +36,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final PdfSession? session = ref.watch(pdfSessionProvider);
+    final ThemeMode currentTheme = ref.watch(themeModeProvider);
 
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
       appBar: AppBar(
         title: const Text('Signer App — Firma de PDFs'),
         actions: session == null
-            ? null
+            ? <Widget>[
+                PopupMenuButton<String>(
+                  onSelected: (String value) => _onMenuSelected(value),
+                  itemBuilder: (BuildContext context) =>
+                      <PopupMenuEntry<String>>[
+                    ..._buildThemeItems(context, currentTheme),
+                  ],
+                ),
+              ]
             : <Widget>[
                 IconButton(
                   tooltip: 'Abrir otro PDF',
@@ -54,19 +64,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   icon: const Icon(Icons.close),
                 ),
                 PopupMenuButton<String>(
-                  onSelected: (String value) {
-                    switch (value) {
-                      case 'batch':
-                        _signBatch();
-                        break;
-                      case 'verify':
-                        _verify();
-                        break;
-                      case 'verifyCurrent':
-                        _verifyCurrent();
-                        break;
-                    }
-                  },
+                  onSelected: (String value) => _onMenuSelected(value),
                   itemBuilder: (BuildContext context) =>
                       <PopupMenuEntry<String>>[
                     const PopupMenuItem<String>(
@@ -81,6 +79,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       value: 'verifyCurrent',
                       child: Text('Verificar documento abierto'),
                     ),
+                    const PopupMenuDivider(),
+                    ..._buildThemeItems(context, currentTheme),
                   ],
                 ),
               ],
@@ -553,6 +553,52 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     } finally {
       if (mounted) setState(() => _verifyBusy = false);
     }
+  }
+
+  void _onMenuSelected(String value) {
+    switch (value) {
+      case 'batch':
+        _signBatch();
+        break;
+      case 'verify':
+        _verify();
+        break;
+      case 'verifyCurrent':
+        _verifyCurrent();
+        break;
+      case 'themeLight':
+        ref.read(themeModeProvider.notifier).setThemeMode(ThemeMode.light);
+        break;
+      case 'themeDark':
+        ref.read(themeModeProvider.notifier).setThemeMode(ThemeMode.dark);
+        break;
+      case 'themeSystem':
+        ref.read(themeModeProvider.notifier).setThemeMode(ThemeMode.system);
+        break;
+    }
+  }
+
+  List<PopupMenuEntry<String>> _buildThemeItems(
+    BuildContext context,
+    ThemeMode current,
+  ) {
+    return <PopupMenuEntry<String>>[
+      CheckedPopupMenuItem<String>(
+        value: 'themeLight',
+        checked: current == ThemeMode.light,
+        child: const Text('Tema claro'),
+      ),
+      CheckedPopupMenuItem<String>(
+        value: 'themeDark',
+        checked: current == ThemeMode.dark,
+        child: const Text('Tema oscuro'),
+      ),
+      CheckedPopupMenuItem<String>(
+        value: 'themeSystem',
+        checked: current == ThemeMode.system,
+        child: const Text('Tema del sistema'),
+      ),
+    ];
   }
 
   void _showSnack(String message) {
