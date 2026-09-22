@@ -74,4 +74,9 @@ class FileService {
     }
     return PickedFile(path: file.path ?? file.name, bytes: file.bytes!);
   }
+
+  /// Selecciona un directorio del sistema.
+  Future<String?> pickDirectory() async {
+    return FilePicker.platform.getDirectoryPath();
+  }
 }

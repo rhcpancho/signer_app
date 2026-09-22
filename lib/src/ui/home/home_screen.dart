@@ -5,11 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pdfrx/pdfrx.dart';
 
+import '../../models/batch_job.dart';
 import '../../models/signature_placement.dart';
 import '../../services/file_service.dart';
 import '../../services/pdf_signer_service.dart';
 import '../../services/signature_setup.dart';
 import '../verificar_firma_page.dart';
+import 'batch_progress_page.dart';
+import 'batch_setup_dialog.dart';
 import 'pdf_session.dart';
 import 'pdf_viewer_area.dart';
 import 'signing_banner.dart';
@@ -469,34 +472,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final SignSetup? setup = await showSignSetupDialog(context);
     if (setup == null || !mounted) return;
 
+    final BatchSetupResult? batchSetup = await showBatchSetupDialog(
+      context,
+      pickedFiles: picked,
+    );
+    if (batchSetup == null || !mounted) return;
+
+    final BatchJobConfig config = BatchJobConfig(
+      profile: setup.profile,
+      password: setup.password,
+      zone: batchSetup.zone,
+      files: batchSetup.files,
+      outputDirectory: batchSetup.outputDirectory,
+    );
+
     setState(() => _batchBusy = true);
-    final PdfSignerService service = PdfSignerService();
-    int ok = 0;
     try {
-      for (final PickedFile file in picked) {
-        final SignaturePlacement? placement =
-            await service.defaultPlacementForLastPage(
-          file.bytes,
-          profileId: setup.profile.id,
-        );
-        if (placement == null) continue;
-        final Uint8List bytes = await service.sign(
-          inputBytes: file.bytes,
-          requests: <SignRequest>[
-            SignRequest(
-              placement: placement,
-              profile: setup.profile,
-              certificatePassword: setup.password,
-            ),
-          ],
-        );
-        await service.save(bytes, file.path);
-        ok++;
-      }
       if (!mounted) return;
-      _showSnack('Firmados $ok de ${picked.length}');
-    } catch (e) {
-      if (mounted) _showSnack('Error en el lote: $e');
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => BatchProgressPage(config: config),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _batchBusy = false);
     }
