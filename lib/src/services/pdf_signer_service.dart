@@ -8,7 +8,10 @@ import 'package:syncfusion_flutter_pdf/pdf.dart';
 
 import '../models/batch_job.dart';
 import '../models/certificate_profile.dart';
+import '../models/page_coords.dart';
+import '../models/signature_chain.dart';
 import '../models/signature_placement.dart';
+import 'signature_crypto.dart';
 
 /// Describe una firma a aplicar: certificado + zona + contraseña del PFX.
 class SignRequest {
@@ -47,6 +50,9 @@ class PdfSignatureFieldInfo {
     this.certValidTo,
     this.digestAlgorithm,
     this.bounds,
+    this.unrotatedPageSize,
+    this.rotationDegrees = 0,
+    this.chainInfo,
   });
 
   final String? name;
@@ -80,6 +86,16 @@ class PdfSignatureFieldInfo {
 
   /// Rectángulo del campo de firma en puntos PDF (para resaltado).
   final Rect? bounds;
+
+  /// Tamaño de página sin rotar (Syncfusion `page.size`), si se conoce.
+  final Size? unrotatedPageSize;
+
+  /// Rotación de la página en grados (0, 90, 180, 270).
+  final int rotationDegrees;
+
+  /// Análisis CMS/X.509 de la firma (integridad, crypto, cadena).
+  /// `null` si el campo no tiene CMS extraíble (p. ej. solo visual).
+  final SignatureChainInfo? chainInfo;
 }
 
 /// Detalle por campo de la verificación de firmas de un PDF.
@@ -129,6 +145,19 @@ class PdfSignerService {
     return true;
   }
 
+  static int _syncfusionRotationDegrees(PdfPageRotateAngle rotation) {
+    switch (rotation) {
+      case PdfPageRotateAngle.rotateAngle90:
+        return 90;
+      case PdfPageRotateAngle.rotateAngle180:
+        return 180;
+      case PdfPageRotateAngle.rotateAngle270:
+        return 270;
+      case PdfPageRotateAngle.rotateAngle0:
+        return 0;
+    }
+  }
+
   /// Firma `inputBytes` aplicando todas las [SignRequest].
   ///
   /// Devuelve los bytes del PDF firmado. El documento original no cambia.
@@ -149,16 +178,16 @@ class PdfSignerService {
       for (int i = 0; i < requests.length; i++) {
         final SignRequest request = requests[i];
         final PdfPage page = document.pages[request.placement.pageIndex];
+        final Rect bounds = PageCoords.displayToUnrotated(
+          rect: request.placement.rect,
+          unrotatedSize: page.size,
+          rotationDegrees: _syncfusionRotationDegrees(page.rotation),
+        );
 
         final PdfSignatureField field = PdfSignatureField(
           page,
           'Signature$i',
-          bounds: Rect.fromLTWH(
-            request.placement.rect.left,
-            request.placement.rect.top,
-            request.placement.rect.width,
-            request.placement.rect.height,
-          ),
+          bounds: bounds,
         );
 
         final PdfCertificate? certificate = _buildCertificate(request);
@@ -180,18 +209,13 @@ class PdfSignerService {
           final PdfGraphics? graphics = field.appearance.normal.graphics;
           graphics?.drawImage(
             PdfBitmap(request.profile.signatureBytes),
-            Rect.fromLTWH(
-              0,
-              0,
-              request.placement.rect.width,
-              request.placement.rect.height,
-            ),
+            Rect.fromLTWH(0, 0, bounds.width, bounds.height),
           );
         } else if (certificate != null) {
           _drawTextAppearance(
             field,
             request.profile,
-            request.placement.rect,
+            bounds,
           );
         }
 
@@ -408,6 +432,10 @@ class PdfSignerService {
           if (page != null) {
             pageIndex = pages.indexOf(page);
           }
+          SignatureChainInfo? chainInfo;
+          if (hasSignature) {
+            chainInfo = SignatureCryptoService().analyseSignature(field, bytes);
+          }
           fields.add(PdfSignatureFieldInfo(
             name: field.name,
             pageIndex: pageIndex,
@@ -422,7 +450,12 @@ class PdfSignerService {
             certValidTo: signature?.certificate?.validTo,
             digestAlgorithm: signature?.digestAlgorithm.name,
             bounds: field.bounds,
-          ));        }
+            unrotatedPageSize: page?.size,
+            rotationDegrees:
+                page == null ? 0 : _syncfusionRotationDegrees(page.rotation),
+            chainInfo: chainInfo,
+          ));
+        }
       }
       return PdfSignatureDetailReport(
         fields: fields,
@@ -455,21 +488,25 @@ class PdfSignerService {
       const double margin = 16;
 
       final PdfPage last = document.pages[document.pages.count - 1];
-      final double pageWidth = last.size.width;
-      final double pageHeight = last.size.height;
+      final Size unrotatedSize = last.size;
+      final int rotationDegrees = _syncfusionRotationDegrees(last.rotation);
+      final Size displaySize =
+          PageCoords.displaySize(unrotatedSize, rotationDegrees);
+
+      final Rect displayRect = Rect.fromLTWH(
+        (displaySize.width - stampWidth - margin)
+            .clamp(0.0, displaySize.width - stampWidth)
+            .toDouble(),
+        (displaySize.height - stampHeight - margin)
+            .clamp(0.0, displaySize.height - stampHeight)
+            .toDouble(),
+        (stampWidth.clamp(0.0, displaySize.width)).toDouble(),
+        (stampHeight.clamp(0.0, displaySize.height)).toDouble(),
+      );
 
       return SignaturePlacement(
         pageIndex: document.pages.count - 1,
-        rect: Rect.fromLTWH(
-          (pageWidth - stampWidth - margin)
-              .clamp(0.0, pageWidth - stampWidth)
-              .toDouble(),
-          (pageHeight - stampHeight - margin)
-              .clamp(0.0, pageHeight - stampHeight)
-              .toDouble(),
-          (stampWidth.clamp(0.0, pageWidth)).toDouble(),
-          (stampHeight.clamp(0.0, pageHeight)).toDouble(),
-        ),
+        rect: displayRect,
         profileId: profileId,
       );
     } finally {
@@ -497,12 +534,15 @@ class PdfSignerService {
 
       final bool useLastPage =
           zone == BatchPlacementZone.lastPageBottomRight ||
-          zone == BatchPlacementZone.lastPageCenter;
-      final int pageIndex =
-          useLastPage ? document.pages.count - 1 : 0;
+              zone == BatchPlacementZone.lastPageCenter;
+      final int pageIndex = useLastPage ? document.pages.count - 1 : 0;
       final PdfPage page = document.pages[pageIndex];
-      final double pageWidth = page.size.width;
-      final double pageHeight = page.size.height;
+      final Size unrotatedSize = page.size;
+      final int rotationDegrees = _syncfusionRotationDegrees(page.rotation);
+      final Size displaySize =
+          PageCoords.displaySize(unrotatedSize, rotationDegrees);
+      final double pageWidth = displaySize.width;
+      final double pageHeight = displaySize.height;
 
       final bool center =
           zone == BatchPlacementZone.lastPageCenter ||

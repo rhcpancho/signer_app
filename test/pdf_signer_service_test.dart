@@ -55,6 +55,43 @@ void main() {
     expect(report.signed + report.pending, 1);
   });
 
+  test('inspectSignatureDetails no lanza y expone chainInfo posible', () async {
+    final PdfDocument inputDoc = PdfDocument();
+    inputDoc.pages.add();
+    final Uint8List input = Uint8List.fromList(await inputDoc.save());
+    inputDoc.dispose();
+
+    const SignaturePlacement placement = SignaturePlacement(
+      pageIndex: 0,
+      rect: Rect.fromLTWH(50, 50, 220, 80),
+      profileId: 'test-chain',
+    );
+    final CertificateProfile profile = CertificateProfile(
+      id: 'test-chain',
+      name: 'Test',
+      reason: 'Prueba',
+      certificatePath: '',
+      signatureBytes: base64Decode(_kPng1x1),
+    );
+
+    final Uint8List output = await PdfSignerService().sign(
+      inputBytes: input,
+      requests: <SignRequest>[
+        SignRequest(placement: placement, profile: profile),
+      ],
+    );
+
+    final PdfSignatureDetailReport report =
+        await PdfSignerService().inspectSignatureDetails(output);
+    expect(report.fields, hasLength(1));
+    // Firma visual sin certificado: chainInfo puede ser null o sin CMS.
+    final chain = report.fields[0].chainInfo;
+    if (chain != null) {
+      expect(chain.chainNodes, isA<List<dynamic>>());
+      expect(chain.error, anyOf(isNull, isA<String>()));
+    }
+  });
+
   test('Sin rúbrica el sello usa apariencia de texto estándar', () async {
     final PdfDocument inputDoc = PdfDocument();
     inputDoc.pages.add();

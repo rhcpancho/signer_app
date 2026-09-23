@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:pdfrx/pdfrx.dart';
 
+import '../models/page_coords.dart';
+import '../models/signature_chain.dart';
 import '../services/pdf_signer_service.dart';
 
 class VerificarFirmaPage extends StatefulWidget {
@@ -43,13 +45,15 @@ class _VerificarFirmaPageState extends State<VerificarFirmaPage> {
     final PdfSignatureFieldInfo field = widget.report.fields[index];
     if (field.pageIndex != null && field.bounds != null) {
       final ui.Rect b = field.bounds!;
+      final double pageHeight =
+          field.unrotatedPageSize?.height ?? (b.top + b.height);
       _controller.goToRectInsidePage(
         pageNumber: field.pageIndex! + 1,
         rect: PdfRect(
           b.left,
-          b.top + b.height,
+          pageHeight - b.top,
           b.left + b.width,
-          b.top,
+          pageHeight - b.top - b.height,
         ),
       );
     } else if (field.pageIndex != null) {
@@ -128,15 +132,21 @@ class _VerificarFirmaPageState extends State<VerificarFirmaPage> {
           if (field.pageIndex! != page.pageNumber - 1) return <Widget>[];
           if (field.bounds == null) return <Widget>[];
 
+          final ui.Size unrotatedSize =
+              field.unrotatedPageSize ?? ui.Size(page.width, page.height);
+          final ui.Rect displayRect = PageCoords.unrotatedToDisplay(
+            rect: field.bounds!,
+            unrotatedSize: unrotatedSize,
+            rotationDegrees: field.rotationDegrees,
+          );
           final double scaleX = pageRect.width / page.width;
           final double scaleY = pageRect.height / page.height;
-          final ui.Rect r = field.bounds!;
           return <Widget>[
             Positioned(
-              left: r.left * scaleX,
-              top: r.top * scaleY,
-              width: r.width * scaleX,
-              height: r.height * scaleY,
+              left: displayRect.left * scaleX,
+              top: displayRect.top * scaleY,
+              width: displayRect.width * scaleX,
+              height: displayRect.height * scaleY,
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: Colors.blue.withOpacity(0.25),
@@ -191,27 +201,114 @@ class _VerificarFirmaPageState extends State<VerificarFirmaPage> {
         ),
         const Divider(height: 1),
         Expanded(
-          child: widget.report.fields.isEmpty
-              ? const Center(
-                  child: Text('No se encontraron campos de firma.'),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  itemCount: widget.report.fields.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 2),
-                  itemBuilder: (BuildContext context, int index) {
-                    final PdfSignatureFieldInfo field =
-                        widget.report.fields[index];
-                    final bool selected = _selectedIndex == index;
-                    return _FieldTile(
-                      field: field,
-                      selected: selected,
-                      onTap: () => _selectField(index),
-                    );
-                  },
-                ),
+          child: _selectedIndex == null
+              ? (widget.report.fields.isEmpty
+                  ? const Center(
+                      child: Text('No se encontraron campos de firma.'),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      itemCount: widget.report.fields.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 2),
+                      itemBuilder: (BuildContext context, int index) {
+                        final PdfSignatureFieldInfo field =
+                            widget.report.fields[index];
+                        final bool selected = _selectedIndex == index;
+                        return _FieldTile(
+                          field: field,
+                          selected: selected,
+                          onTap: () => _selectField(index),
+                        );
+                      },
+                    ))
+              : _buildSelectedFieldPanel(),
         ),
       ],
+    );
+  }
+
+  Widget _buildSelectedFieldPanel() {
+    final PdfSignatureFieldInfo field = widget.report.fields[_selectedIndex!];
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                field.name ?? 'Firma (sin nombre)',
+                style: Theme.of(context).textTheme.titleSmall,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Volver a la lista',
+              onPressed: () => setState(() => _selectedIndex = null),
+              icon: const Icon(Icons.close, size: 18),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _kv('Página', field.pageIndex == null ? '—' : '${field.pageIndex! + 1}'),
+        if (field.signedDate != null)
+          _kv('Fecha', _formatDateTime(field.signedDate!)),
+        if (field.signedName != null && field.signedName!.isNotEmpty)
+          _kv('Firmante', field.signedName!),
+        if (field.reason != null && field.reason!.isNotEmpty)
+          _kv('Motivo', field.reason!),
+        if (field.locationInfo != null && field.locationInfo!.isNotEmpty)
+          _kv('Lugar', field.locationInfo!),
+        if (field.certSubject != null && field.certSubject!.isNotEmpty)
+          _kv('Certificado', field.certSubject!),
+        if (field.certIssuer != null && field.certIssuer!.isNotEmpty)
+          _kv('Emisor', field.certIssuer!),
+        if (field.digestAlgorithm != null)
+          _kv('Digest', field.digestAlgorithm!),
+        const SizedBox(height: 12),
+        if (field.chainInfo != null)
+          _ChainPanel(info: field.chainInfo!)
+        else if (field.hasSignature)
+          Text(
+            'Sin CMS extraíble para análisis de cadena.',
+            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
+          )
+        else
+          Text(
+            'Campo pendiente de firma.',
+            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
+          ),
+        const SizedBox(height: 16),
+        FilledButton.tonalIcon(
+          onPressed: () => setState(() => _selectedIndex = null),
+          icon: const Icon(Icons.arrow_back, size: 16),
+          label: const Text('Volver a la lista'),
+        ),
+      ],
+    );
+  }
+
+  Widget _kv(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          SizedBox(
+            width: 96,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(value, style: const TextStyle(fontSize: 12)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -351,6 +448,269 @@ class _Badge extends StatelessWidget {
             style: TextStyle(
               color: color,
               fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _formatDateTime(DateTime date) {
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${two(date.day)}/${two(date.month)}/${date.year} '
+      '${two(date.hour)}:${two(date.minute)}';
+}
+
+Color _validityColor(CertValidity v) {
+  switch (v.value) {
+    case true:
+      return Colors.green;
+    case false:
+      return Colors.red;
+    default:
+      return Colors.orange;
+  }
+}
+
+String _validityText(CertValidity v) {
+  switch (v.value) {
+    case true:
+      return 'Vigente';
+    case false:
+      return 'No vigente';
+    default:
+      return 'Sin datos';
+  }
+}
+
+class _ChainPanel extends StatelessWidget {
+  const _ChainPanel({required this.info});
+
+  final SignatureChainInfo info;
+
+  Widget _statusChip(BuildContext context, String label, bool? ok) {
+    final Color color = ok == true
+        ? Colors.green
+        : ok == false
+            ? Colors.red
+            : Colors.orange;
+    final IconData icon = ok == true
+        ? Icons.check_circle
+        : ok == false
+            ? Icons.cancel
+            : Icons.help_outline;
+    return _MiniChip(label: label, color: color, icon: icon);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    if (info.error != null && info.chainNodes.isEmpty) {
+      return Card(
+        margin: EdgeInsets.zero,
+        color: scheme.errorContainer,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Text(
+            'No se pudo analizar la cadena: ${info.error}',
+            style: TextStyle(fontSize: 12, color: scheme.onErrorContainer),
+          ),
+        ),
+      );
+    }
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Cadena de certificados',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: <Widget>[
+                _statusChip(context, 'Integridad', info.documentIntegrityOk),
+                _statusChip(
+                    context, 'Firma', info.signatureCryptographicOk),
+                _statusChip(
+                    context, 'Valida', info.signatureValidates),
+                _statusChip(
+                  context,
+                  'Cadena',
+                  info.chainComplete ? true : false,
+                ),
+              ],
+            ),
+            if (info.signingTime != null) ...<Widget>[
+              const SizedBox(height: 6),
+              Text(
+                'Firmada el ${_formatDateTime(info.signingTime!)}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+            if (info.error != null) ...<Widget>[
+              const SizedBox(height: 6),
+              Text(
+                info.error!,
+                style: TextStyle(fontSize: 11, color: scheme.error),
+              ),
+            ],
+            const SizedBox(height: 8),
+            if (info.chainNodes.isEmpty)
+              Text(
+                'Sin certificados embebidos en el CMS.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: scheme.onSurfaceVariant,
+                ),
+              )
+            else
+              ...List<Widget>.generate(
+                info.chainNodes.length,
+                (int i) => _ChainNodeTile(
+                  node: info.chainNodes[i],
+                  index: i,
+                  isLast: i == info.chainNodes.length - 1,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ChainNodeTile extends StatelessWidget {
+  const _ChainNodeTile({
+    required this.node,
+    required this.index,
+    required this.isLast,
+  });
+
+  final CertChainNode node;
+  final int index;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final Color vColor = _validityColor(node.validityAtSigning);
+    final String role = node.isSelfSigned
+        ? (node.isCa ? 'Raíz' : 'Auto-firmado')
+        : (node.isCa ? 'CA intermedia' : 'Sello');
+    return Padding(
+      padding: const EdgeInsets.only(left: 8, top: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Column(
+            children: <Widget>[
+              Container(
+                width: 10,
+                height: 10,
+                margin: const EdgeInsets.only(top: 4),
+                decoration: BoxDecoration(
+                  color: index == 0 ? scheme.primary : vColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              if (!isLast)
+                Container(width: 2, height: 36, color: scheme.outlineVariant),
+            ],
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  node.subject,
+                  style: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+                Text(
+                  role,
+                  style: TextStyle(fontSize: 11, color: scheme.primary),
+                ),
+                if (node.validFrom != null && node.validTo != null)
+                  Text(
+                    '${_formatDateTime(node.validFrom!)} → '
+                    '${_formatDateTime(node.validTo!)}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: _MiniChip(
+                    label: _validityText(node.validityAtSigning),
+                    color: vColor,
+                    icon: node.validityAtSigning.value == true
+                        ? Icons.event_available
+                        : node.validityAtSigning.value == false
+                            ? Icons.event_busy
+                            : Icons.event,
+                  ),
+                ),
+                if (node.issuer != node.subject)
+                  Text(
+                    'Emisor: ${node.issuer}',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniChip extends StatelessWidget {
+  const _MiniChip({
+    required this.label,
+    required this.color,
+    required this.icon,
+  });
+
+  final String label;
+  final Color color;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 11, color: color),
+          const SizedBox(width: 3),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
               fontWeight: FontWeight.w600,
             ),
           ),

@@ -134,55 +134,67 @@ class PdfViewerAreaState extends ConsumerState<PdfViewerArea> {
                   pageSizeCallback: _fitPageSize,
                   decorationBuilder: (BuildContext context, ui.Size pageSize,
                       _, RawImage? pageImage) {
-                    final double scale =
-                        pageSize.width / page.width;
-                    return Center(
-                      child: SizedBox(
-                        width: pageSize.width,
-                        height: pageSize.height,
-                        child: DecoratedBox(
-                          decoration: const BoxDecoration(
-                            color: Colors.white,
-                            boxShadow: <BoxShadow>[
-                              BoxShadow(
-                                color: Colors.black26,
-                                blurRadius: 8,
-                                offset: Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Stack(
-                            children: <Widget>[
-                              Positioned.fill(
-                                child: ClipRect(
-                                  child: FittedBox(
-                                    fit: BoxFit.fill,
-                                    child: pageImage ?? const SizedBox.shrink(),
+                    // pageSize está en píxeles físicos (×DPR); el layout y la
+                    // escala de overlays/taps deben usar constraints lógicos.
+                    return LayoutBuilder(
+                      builder: (BuildContext context, BoxConstraints c) {
+                        final double availW = c.maxWidth - _kMargin;
+                        final double availH = c.maxHeight - _kMargin;
+                        final double scale = (availW <= 0 || availH <= 0)
+                            ? 1.0
+                            : (availW / page.width < availH / page.height)
+                                ? availW / page.width
+                                : availH / page.height;
+                        return Center(
+                          child: SizedBox(
+                            width: page.width * scale,
+                            height: page.height * scale,
+                            child: DecoratedBox(
+                              decoration: const BoxDecoration(
+                                color: Colors.white,
+                                boxShadow: <BoxShadow>[
+                                  BoxShadow(
+                                    color: Colors.black26,
+                                    blurRadius: 8,
+                                    offset: Offset(0, 2),
                                   ),
-                                ),
+                                ],
                               ),
-                              if (signCtx != null)
-                                Positioned.fill(
-                                  child: GestureDetector(
-                                    behavior: HitTestBehavior.opaque,
-                                    onTapUp: (TapUpDetails details) =>
-                                        _addPlacementAt(
-                                      details.localPosition,
-                                      page,
-                                      pageSize,
-                                      signCtx,
+                              child: Stack(
+                                children: <Widget>[
+                                  Positioned.fill(
+                                    child: ClipRect(
+                                      child: FittedBox(
+                                        fit: BoxFit.fill,
+                                        child: pageImage ??
+                                            const SizedBox.shrink(),
+                                      ),
                                     ),
                                   ),
-                                ),
-                              ..._buildPageOverlays(
-                                pageIndex: index,
-                                scale: scale,
-                                session: session,
+                                  if (signCtx != null)
+                                    Positioned.fill(
+                                      child: GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onTapUp: (TapUpDetails details) =>
+                                            _addPlacementAt(
+                                          details.localPosition,
+                                          page,
+                                          scale,
+                                          signCtx,
+                                        ),
+                                      ),
+                                    ),
+                                  ..._buildPageOverlays(
+                                    pageIndex: index,
+                                    scale: scale,
+                                    session: session,
+                                  ),
+                                ],
                               ),
-                            ],
+                            ),
                           ),
-                        ),
-                      ),
+                        );
+                      },
                     );
                   },
                 ),
@@ -195,6 +207,8 @@ class PdfViewerAreaState extends ConsumerState<PdfViewerArea> {
   }
 
   static ui.Size _fitPageSize(ui.Size biggest, PdfPage page) {
+    // `biggest` llega en píxeles físicos (pdfrx multiplica ×DPR); sirve solo
+    // para resolver la resolución de render, no el layout lógico.
     final double availWidth = biggest.width - _kMargin;
     final double availHeight = biggest.height - _kMargin;
     if (availWidth <= 0 || availHeight <= 0) {
@@ -247,11 +261,10 @@ class PdfViewerAreaState extends ConsumerState<PdfViewerArea> {
   Future<void> _addPlacementAt(
     Offset localPosition,
     PdfPage page,
-    ui.Size pageSize,
+    double scale,
     ActiveSignContext signCtx,
   ) async {
     final Size boxSize = await _signatureSizeForProfile(signCtx.profile);
-    final double scale = pageSize.width / page.width;
     final double left =
         (localPosition.dx / scale - boxSize.width / 2)
             .clamp(0.0, page.width - boxSize.width);

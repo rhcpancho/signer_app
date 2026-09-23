@@ -2,10 +2,10 @@ import 'dart:ui';
 
 /// Ubicación de una firma dentro de una página del documento.
 ///
-/// El rectángulo está expresado en **puntos PDF** (coordenadas canónicas
-/// del documento, 1 punto = 1/72 de pulgada) y `pageIndex` es 0-based,
-/// de forma que las coordenadas coincidan exactamente con las de
-/// `PdfSignatureField.bounds` de Syncfusion.
+/// El rectángulo está expresado en **puntos del espacio de visualización**
+/// (tamaño rotado de la página de pdfrx, origen arriba-izquierda, y hacia
+/// abajo) y `pageIndex` es 0-based. Al firmar se convierte al espacio sin
+/// rotar con `PageCoords.displayToUnrotated` para `PdfSignatureField.bounds`.
 class SignaturePlacement {
   const SignaturePlacement({
     required this.pageIndex,
