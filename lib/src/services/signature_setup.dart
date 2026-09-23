@@ -9,6 +9,7 @@ import '../models/certificate_profile.dart';
 import 'file_service.dart';
 import 'pdf_signer_service.dart';
 import 'signature_store.dart';
+import 'tsa_service.dart';
 
 final signatureStoreProvider = FutureProvider<SignatureStore>(
   (ref) async => SignatureStore(await SharedPreferences.getInstance()),
@@ -63,12 +64,16 @@ class _SignSetupDialogState extends ConsumerState<_SignSetupDialog> {
   final TextEditingController _reasonController = TextEditingController();
   final TextEditingController _locationController = TextEditingController();
   final TextEditingController _contactController = TextEditingController();
+  final TextEditingController _tsaUrlController =
+      TextEditingController(text: kDefaultTsaUrl);
   String? _selectedCertificateId;
   String? _certificatePath;
   String _certificatePassword = '';
   bool _rememberPassword = false;
   bool _saving = false;
   Uint8ListImage? _rubrica;
+  bool _useTsa = false;
+  String _tsaUrl = kDefaultTsaUrl;
 
   @override
   void initState() {
@@ -82,6 +87,7 @@ class _SignSetupDialogState extends ConsumerState<_SignSetupDialog> {
     _reasonController.dispose();
     _locationController.dispose();
     _contactController.dispose();
+    _tsaUrlController.dispose();
     super.dispose();
   }
 
@@ -111,6 +117,9 @@ class _SignSetupDialogState extends ConsumerState<_SignSetupDialog> {
       _locationController.text = profile.location;
       _contactController.text = profile.contact;
       _certificatePassword = '';
+      _useTsa = profile.useTsa;
+      _tsaUrl = profile.tsaUrl.isEmpty ? kDefaultTsaUrl : profile.tsaUrl;
+      _tsaUrlController.text = _tsaUrl;
       _rubrica = profile.hasRubric
           ? Uint8ListImage(bytes: profile.signatureBytes, name: profile.name)
           : null;
@@ -138,6 +147,9 @@ class _SignSetupDialogState extends ConsumerState<_SignSetupDialog> {
       _reasonController.clear();
       _locationController.clear();
       _contactController.clear();
+      _useTsa = false;
+      _tsaUrl = kDefaultTsaUrl;
+      _tsaUrlController.text = kDefaultTsaUrl;
       _rubrica = null;
     });
   }
@@ -204,6 +216,8 @@ class _SignSetupDialogState extends ConsumerState<_SignSetupDialog> {
         contact: _contactController.text.trim(),
         certificatePath: certificatePath,
         signatureBytes: _rubrica?.bytes ?? Uint8List(0),
+        useTsa: _useTsa,
+        tsaUrl: _tsaUrl.trim().isEmpty ? kDefaultTsaUrl : _tsaUrl.trim(),
       );
       await persistProfile(ref, profile);
 
@@ -379,6 +393,42 @@ class _SignSetupDialogState extends ConsumerState<_SignSetupDialog> {
                   'texto estándar.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+              ],
+              const SizedBox(height: 20),
+              _SectionHeader(
+                icon: Icons.schedule,
+                iconColor: Colors.orange,
+                title: '3. Sello de tiempo (TSA)',
+                badge: 'opcional',
+                badgeColor: Theme.of(context).colorScheme.outline,
+              ),
+              const SizedBox(height: 8),
+              CheckboxListTile(
+                value: _useTsa,
+                onChanged: (bool? v) =>
+                    setState(() => _useTsa = v ?? false),
+                title: const Text('Sellar con RFC 3161 (TSA)',
+                    style: TextStyle(fontSize: 13)),
+                subtitle: const Text(
+                  'Soft-fail: si el TSA no responde, la firma se completa igual.',
+                  style: TextStyle(fontSize: 11),
+                ),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                dense: true,
+              ),
+              if (_useTsa) ...<Widget>[
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _tsaUrlController,
+                  onChanged: (String v) => _tsaUrl = v,
+                  decoration: const InputDecoration(
+                    labelText: 'URL del TSA',
+                    hintText: kDefaultTsaUrl,
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
                 ),
               ],
             ],

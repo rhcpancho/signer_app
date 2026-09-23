@@ -9,6 +9,7 @@ import 'package:pdfrx/pdfrx.dart';
 import '../models/page_coords.dart';
 import '../models/signature_chain.dart';
 import '../services/pdf_signer_service.dart';
+import '../services/tsa_service.dart';
 import 'widgets/signature_frame.dart';
 
 class VerificarFirmaPage extends StatefulWidget {
@@ -32,6 +33,7 @@ class VerificarFirmaPage extends StatefulWidget {
 class _VerificarFirmaPageState extends State<VerificarFirmaPage> {
   int? _selectedIndex;
   late final PdfViewerController _controller;
+  TsaResult? _tsaSidecar;
 
   static const ui.Size _kMinViewerSize = ui.Size(320, 200);
 
@@ -39,6 +41,24 @@ class _VerificarFirmaPageState extends State<VerificarFirmaPage> {
   void initState() {
     super.initState();
     _controller = PdfViewerController();
+    _loadTsaSidecar();
+  }
+
+  /// Lee el sidecar `.tsr` junto al PDF verificado (si existe).
+  Future<void> _loadTsaSidecar() async {
+    try {
+      final String path = widget.outputPath;
+      if (path.isEmpty) return;
+      final File sidecar = File('$path.tsr');
+      if (!await sidecar.exists()) return;
+      final Uint8List bytes = await sidecar.readAsBytes();
+      final TsaResult? r = TsaService.parseTimeStampResponse(bytes);
+      if (r != null && mounted) {
+        setState(() => _tsaSidecar = r);
+      }
+    } catch (_) {
+      // soft-fail: sin sidecar no invalida la verificación
+    }
   }
 
   void _selectField(int index) {
@@ -292,6 +312,10 @@ class _VerificarFirmaPageState extends State<VerificarFirmaPage> {
             'Campo pendiente de firma.',
             style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
           ),
+        if (_tsaSidecar != null) ...<Widget>[
+          const SizedBox(height: 8),
+          _TsaChip(result: _tsaSidecar!),
+        ],
         const SizedBox(height: 16),
         FilledButton.tonalIcon(
           onPressed: () => setState(() => _selectedIndex = null),
@@ -766,6 +790,26 @@ class _MiniChip extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Chip de sello de tiempo RFC 3161 leído del sidecar `.tsr`.
+class _TsaChip extends StatelessWidget {
+  const _TsaChip({required this.result});
+
+  final TsaResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    final String when =
+        result.genTime != null ? _formatDateTime(result.genTime!) : 'ok';
+    final String who =
+        result.tsaName != null ? ' · ${result.tsaName}' : '';
+    return _MiniChip(
+      label: 'TSA $when$who',
+      color: Colors.green,
+      icon: Icons.schedule,
     );
   }
 }

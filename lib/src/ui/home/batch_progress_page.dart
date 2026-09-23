@@ -7,6 +7,7 @@ import 'package:open_filex/open_filex.dart';
 import '../../models/batch_job.dart';
 import '../../models/signature_placement.dart';
 import '../../services/pdf_signer_service.dart';
+import '../../services/tsa_service.dart';
 
 /// Página de progreso y resumen de un lote de firmas.
 class BatchProgressPage extends StatefulWidget {
@@ -82,8 +83,23 @@ class _BatchProgressPageState extends State<BatchProgressPage> {
             ),
           ],
         );
-        await service.save(signed, file.path,
+        final File saved = await service.save(signed, file.path,
             outputDirectory: widget.config.outputDirectory);
+        // TSA soft-fail: sidecar .tsr junto al PDF firmado del lote.
+        if (widget.config.profile.useTsa) {
+          try {
+            final TsaResult? tsa = await TsaService().timestamp(
+              data: signed,
+              url: widget.config.profile.tsaUrl,
+            );
+            if (tsa != null) {
+              await File('${saved.path}.tsr')
+                  .writeAsBytes(tsa.token, flush: true);
+            }
+          } catch (_) {
+            // soft-fail
+          }
+        }
 
         setState(() {
           _results.add(BatchFileResult(

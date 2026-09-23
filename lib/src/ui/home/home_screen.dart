@@ -11,6 +11,7 @@ import '../../models/signature_placement.dart';
 import '../../services/file_service.dart';
 import '../../services/pdf_signer_service.dart';
 import '../../services/signature_setup.dart';
+import '../../services/tsa_service.dart';
 import '../../core/theme_provider.dart';
 import '../verificar_firma_page.dart';
 import '../widgets/drop_zone_overlay.dart';
@@ -425,6 +426,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         bytes,
         session.sourcePath,
       );
+      // TSA soft-fail: si el perfil lo pide, sella el PDF final y guarda
+      // el token en un sidecar `.tsr`; si falla, la firma ya está completa.
+      if (ctx.profile.useTsa) {
+        try {
+          final TsaService tsa = TsaService();
+          final TsaResult? result = await tsa.timestamp(
+            data: bytes,
+            url: ctx.profile.tsaUrl,
+          );
+          if (result != null) {
+            final File sidecar = File('${output.path}.tsr');
+            await sidecar.writeAsBytes(result.token, flush: true);
+          }
+        } catch (_) {
+          // soft-fail: no invalida la firma
+        }
+      }
       ref.read(pdfSessionProvider.notifier).markAllSigned();
       if (!mounted) return;
       await _showSignSummary(

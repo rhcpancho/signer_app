@@ -52,6 +52,48 @@ void main() {
       expect(c.location, 'Madrid');
       expect(p.contact, '');
     });
+
+    test('fromJson sin useTsa/tsaUrl (perfiles antiguos) usa defaults', () {
+      final CertificateProfile p = CertificateProfile.fromJson(
+        <String, dynamic>{
+          'id': '1',
+          'name': 'Ana',
+          'reason': 'OK',
+          'certificatePath': '/tmp/x.pfx',
+        },
+      );
+      expect(p.useTsa, isFalse);
+      expect(p.tsaUrl, contains('timestamp.digicert.com'));
+    });
+
+    test('toJson/fromJson preserva useTsa y tsaUrl', () {
+      final CertificateProfile p = CertificateProfile(
+        id: '1',
+        name: 'Ana',
+        reason: 'OK',
+        certificatePath: '/tmp/x.pfx',
+        useTsa: true,
+        tsaUrl: 'http://my-tsa.example',
+      );
+      final CertificateProfile back =
+          CertificateProfile.fromJson(p.toJson());
+      expect(back.useTsa, isTrue);
+      expect(back.tsaUrl, 'http://my-tsa.example');
+    });
+
+    test('copyWith actualiza useTsa/tsaUrl', () {
+      final CertificateProfile p = CertificateProfile(
+        id: '1',
+        name: 'Ana',
+        reason: 'OK',
+        certificatePath: '/tmp/x.pfx',
+      );
+      final CertificateProfile c =
+          p.copyWith(useTsa: true, tsaUrl: 'http://x');
+      expect(c.useTsa, isTrue);
+      expect(c.tsaUrl, 'http://x');
+      expect(p.useTsa, isFalse);
+    });
   });
 
   test('inspectSignatureDetails expone locationInfo y contactInfo', () async {

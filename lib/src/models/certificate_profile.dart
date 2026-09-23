@@ -16,6 +16,8 @@ class CertificateProfile {
     required this.contact,
     required this.certificatePath,
     required this.signatureBytes,
+    this.useTsa = false,
+    this.tsaUrl = 'http://timestamp.digicert.com',
   });
 
   factory CertificateProfile({
@@ -26,6 +28,8 @@ class CertificateProfile {
     String location = '',
     String contact = '',
     Uint8List? signatureBytes,
+    bool useTsa = false,
+    String tsaUrl = 'http://timestamp.digicert.com',
   }) {
     return CertificateProfile._(
       id: id,
@@ -35,6 +39,8 @@ class CertificateProfile {
       contact: contact,
       certificatePath: certificatePath,
       signatureBytes: signatureBytes ?? Uint8List(0),
+      useTsa: useTsa,
+      tsaUrl: tsaUrl.isEmpty ? 'http://timestamp.digicert.com' : tsaUrl,
     );
   }
 
@@ -49,6 +55,10 @@ class CertificateProfile {
       signatureBytes: (json['signature'] as String?) == null
           ? Uint8List(0)
           : Uint8List.fromList(base64Decode(json['signature'] as String)),
+      useTsa: json['useTsa'] as bool? ?? false,
+      tsaUrl: (json['tsaUrl'] as String?)?.isEmpty ?? true
+          ? 'http://timestamp.digicert.com'
+          : json['tsaUrl'] as String,
     );
   }
 
@@ -62,6 +72,12 @@ class CertificateProfile {
   final String certificatePath;
   final Uint8List signatureBytes;
 
+  /// Sello de tiempo RFC 3161 (TSA) soft-fail.
+  final bool useTsa;
+
+  /// URL del TSA (default público DigiCert).
+  final String tsaUrl;
+
   bool get hasRubric => signatureBytes.isNotEmpty;
 
   CertificateProfile copyWith({
@@ -71,6 +87,8 @@ class CertificateProfile {
     String? contact,
     String? certificatePath,
     Uint8List? signatureBytes,
+    bool? useTsa,
+    String? tsaUrl,
   }) {
     return CertificateProfile._(
       id: id,
@@ -80,6 +98,8 @@ class CertificateProfile {
       contact: contact ?? this.contact,
       certificatePath: certificatePath ?? this.certificatePath,
       signatureBytes: signatureBytes ?? this.signatureBytes,
+      useTsa: useTsa ?? this.useTsa,
+      tsaUrl: tsaUrl ?? this.tsaUrl,
     );
   }
 
@@ -91,6 +111,8 @@ class CertificateProfile {
       'location': location,
       'contact': contact,
       'certificatePath': certificatePath,
+      'useTsa': useTsa,
+      'tsaUrl': tsaUrl,
       if (signatureBytes.isNotEmpty)
         'signature': base64Encode(signatureBytes),
     };
