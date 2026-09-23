@@ -53,6 +53,7 @@ class PdfSignatureFieldInfo {
     this.unrotatedPageSize,
     this.rotationDegrees = 0,
     this.chainInfo,
+    this.contactInfo,
   });
 
   final String? name;
@@ -96,6 +97,9 @@ class PdfSignatureFieldInfo {
   /// Análisis CMS/X.509 de la firma (integridad, crypto, cadena).
   /// `null` si el campo no tiene CMS extraíble (p. ej. solo visual).
   final SignatureChainInfo? chainInfo;
+
+  /// Contacto (`/ContactInfo`) del campo de firma, si se guardó al firmar.
+  final String? contactInfo;
 }
 
 /// Detalle por campo de la verificación de firmas de un PDF.
@@ -198,19 +202,19 @@ class PdfSignerService {
             signedName: request.profile.name,
             reason:
                 request.profile.reason.isEmpty ? null : request.profile.reason,
-            contactInfo: null,
-            locationInfo: null,
+            contactInfo: request.profile.contact.isEmpty
+                ? null
+                : request.profile.contact,
+            locationInfo: request.profile.location.isEmpty
+                ? null
+                : request.profile.location,
             digestAlgorithm: DigestAlgorithm.sha256,
             cryptographicStandard: CryptographicStandard.cms,
           );
         }
 
         if (request.profile.signatureBytes.isNotEmpty) {
-          final PdfGraphics? graphics = field.appearance.normal.graphics;
-          graphics?.drawImage(
-            PdfBitmap(request.profile.signatureBytes),
-            Rect.fromLTWH(0, 0, bounds.width, bounds.height),
-          );
+          _drawRubricAppearance(field, request.profile, bounds);
         } else if (certificate != null) {
           _drawTextAppearance(
             field,
@@ -244,18 +248,16 @@ class PdfSignerService {
   /// Dibuja el sello de texto estándar cuando no hay rúbrica:
   ///
   /// ```
-  /// ┌─────────────────────────────┐
-  /// │ Firmado digitalmente por:   │  ⤷ nombre en la misma línea si cabe
-  /// │   Alexander Sosa            │
-  /// │ Fecha: 18/09/2026           │
-  /// │ Motivo: <texto>             │  (si lo hay)
-  /// │ Lugar: <texto>              │  (si lo hay)
-  /// └─────────────────────────────┘
+  /// ┃ Firmado digitalmente por: Ana
+  /// ┃ Fecha: …
+  /// ┃ Motivo: …
+  /// ┃ Lugar: …
+  /// ┃ Contacto: …
+  /// └─────────────────────────────
   /// ```
   ///
-  /// El par "Firmado digitalmente por: <nombre>" se dibuja en una sola línea
-  /// siempre que quepa; si el texto completo supera el ancho, el nombre pasa a
-  /// la línea siguiente.
+  /// Incluye barra de acento izquierda, marco doble tenue y columnas
+  /// fijas de etiqueta/valor.
   void _drawTextAppearance(
     PdfSignatureField field,
     CertificateProfile profile,
@@ -272,6 +274,7 @@ class PdfSignerService {
       ('Fecha', _nowStamp(), false),
       if (profile.reason.isNotEmpty) ('Motivo', profile.reason, false),
       if (profile.location.isNotEmpty) ('Lugar', profile.location, false),
+      if (profile.contact.isNotEmpty) ('Contacto', profile.contact, false),
     ];
 
     final double w = bounds.width;
@@ -288,14 +291,32 @@ class PdfSignerService {
     final PdfBrush labelBrush = PdfSolidBrush(PdfColor(0x3A, 0x3A, 0x40));
     final PdfBrush valueBrush = PdfSolidBrush(PdfColor(0x1B, 0x1B, 0x1F));
     final PdfBrush nameBrush = PdfSolidBrush(PdfColor(0x1F, 0x4E, 0x8C));
+    final PdfBrush accentBrush =
+        PdfSolidBrush(PdfColor(0x1F, 0x4E, 0x8C));
+    final PdfBrush softBg =
+        PdfSolidBrush(PdfColor(0xF7, 0xF9, 0xFC));
 
+    // Fondo tenue + marco doble
     graphics.drawRectangle(
       brush: PdfSolidBrush(PdfColor(0xFF, 0xFF, 0xFF)),
       bounds: Rect.fromLTWH(0, 0, w, h),
     );
     graphics.drawRectangle(
-      pen: PdfPens.lightGray,
-      bounds: Rect.fromLTWH(0.6, 0.6, w - 1.2, h - 1.2),
+      brush: softBg,
+      bounds: Rect.fromLTWH(1, 1, w - 2, h - 2),
+    );
+    graphics.drawRectangle(
+      pen: PdfPen(PdfColor(0x9A, 0xA0, 0xA6), width: 0.8),
+      bounds: Rect.fromLTWH(0.5, 0.5, w - 1, h - 1),
+    );
+    graphics.drawRectangle(
+      pen: PdfPen(PdfColor(0xC8, 0xCD, 0xD4), width: 0.4),
+      bounds: Rect.fromLTWH(2.5, 2.5, w - 5, h - 5),
+    );
+    // Barra de acento izquierda
+    graphics.drawRectangle(
+      brush: accentBrush,
+      bounds: Rect.fromLTWH(1, 4, 2.5, h - 8),
     );
 
     final PdfStringFormat format = PdfStringFormat(
@@ -304,13 +325,15 @@ class PdfSignerService {
       wordWrap: PdfWordWrapType.word,
     );
 
-    const double padX = 3;
-    final double availableW = w - padX * 2;
-    double y = 1;
+    const double padX = 7;
+    const double labelFraction = 0.38;
+    final double availableW = w - padX - 3;
+    final double labelW = (availableW * labelFraction).clamp(18.0, availableW * 0.55);
+    double y = 2;
 
     for (final (String label, String value, bool isName) in rows) {
       final Rect rowBounds = Rect.fromLTWH(padX, y, availableW, lineHeight);
-      if (label.isEmpty) {
+      if (isName) {
         graphics.drawString(
           value,
           titleFont,
@@ -319,44 +342,67 @@ class PdfSignerService {
           format: format,
         );
       } else {
-        final String text = '$label:';
         graphics.drawString(
-          text,
-          titleFont,
+          '$label:',
+          valueFont,
           brush: labelBrush,
-          bounds: rowBounds,
+          bounds: Rect.fromLTWH(padX, y, labelW, lineHeight),
           format: format,
         );
-        if (value.isNotEmpty) {
-          final PdfFont valueFontForRow = isName ? titleFont : valueFont;
-          final PdfBrush valueBrushForRow = isName ? nameBrush : valueBrush;
-          final double labelW =
-              titleFont.measureString(text, format: format).width;
-          final double valueW =
-              valueFontForRow.measureString(value, format: format).width;
-          if (labelW + 2 + valueW <= availableW) {
-            graphics.drawString(
-              value,
-              valueFontForRow,
-              brush: valueBrushForRow,
-              bounds:
-                  Rect.fromLTWH(padX + labelW + 2, y, availableW - labelW - 2, lineHeight),
-              format: format,
-            );
-          } else {
-            y += lineHeight;
-            graphics.drawString(
-              value,
-              valueFontForRow,
-              brush: valueBrushForRow,
-              bounds: Rect.fromLTWH(padX + 4, y, availableW - 4, lineHeight),
-              format: format,
-            );
-          }
-        }
+        graphics.drawString(
+          value,
+          valueFont,
+          brush: valueBrush,
+          bounds: Rect.fromLTWH(
+            padX + labelW + 2,
+            y,
+            availableW - labelW - 2,
+            lineHeight,
+          ),
+          format: format,
+        );
       }
       y += lineHeight;
     }
+  }
+
+  /// Apariencia con rúbrica: fondo, imagen centrada y marco fino.
+  void _drawRubricAppearance(
+    PdfSignatureField field,
+    CertificateProfile profile,
+    Rect bounds,
+  ) {
+    final PdfGraphics? graphics = field.appearance.normal.graphics;
+    if (graphics == null) return;
+    final double w = bounds.width;
+    final double h = bounds.height;
+
+    graphics.drawRectangle(
+      brush: PdfSolidBrush(PdfColor(0xFF, 0xFF, 0xFF)),
+      bounds: Rect.fromLTWH(0, 0, w, h),
+    );
+
+    // Pequeño margen para el marco (si hay sitio).
+    final double inset = (w > 16 && h > 16) ? 2.0 : 0.0;
+    final Rect imgRect = Rect.fromLTWH(
+      inset,
+      inset,
+      w - inset * 2,
+      h - inset * 2,
+    );
+    graphics.drawImage(
+      PdfBitmap(profile.signatureBytes),
+      imgRect,
+    );
+    graphics.drawRectangle(
+      pen: PdfPen(PdfColor(0xC8, 0xCD, 0xD4), width: 0.6),
+      bounds: Rect.fromLTWH(0.5, 0.5, w - 1, h - 1),
+    );
+    // Acento izquierdo también en rúbrica (consistencia).
+    graphics.drawRectangle(
+      brush: PdfSolidBrush(PdfColor(0x1F, 0x4E, 0x8C)),
+      bounds: Rect.fromLTWH(1, 4, 2, (h - 8).clamp(4.0, double.infinity)),
+    );
   }
 
   String _nowStamp() {
@@ -444,6 +490,7 @@ class PdfSignerService {
             signedName: signature?.signedName,
             reason: signature?.reason,
             locationInfo: signature?.locationInfo,
+            contactInfo: signature?.contactInfo,
             certSubject: signature?.certificate?.subjectName,
             certIssuer: signature?.certificate?.issuerName,
             certValidFrom: signature?.certificate?.validFrom,

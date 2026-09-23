@@ -13,6 +13,7 @@ class CertificateProfile {
     required this.name,
     required this.reason,
     required this.location,
+    required this.contact,
     required this.certificatePath,
     required this.signatureBytes,
   });
@@ -23,6 +24,7 @@ class CertificateProfile {
     required String reason,
     required String certificatePath,
     String location = '',
+    String contact = '',
     Uint8List? signatureBytes,
   }) {
     return CertificateProfile._(
@@ -30,6 +32,7 @@ class CertificateProfile {
       name: name,
       reason: reason,
       location: location,
+      contact: contact,
       certificatePath: certificatePath,
       signatureBytes: signatureBytes ?? Uint8List(0),
     );
@@ -41,6 +44,7 @@ class CertificateProfile {
       name: json['name'] as String,
       reason: json['reason'] as String,
       location: json['location'] as String? ?? '',
+      contact: json['contact'] as String? ?? '',
       certificatePath: json['certificatePath'] as String,
       signatureBytes: (json['signature'] as String?) == null
           ? Uint8List(0)
@@ -52,6 +56,9 @@ class CertificateProfile {
   final String name;
   final String reason;
   final String location;
+
+  /// Contacto (email/tel) opcional → diccionario PDF `/ContactInfo`.
+  final String contact;
   final String certificatePath;
   final Uint8List signatureBytes;
 
@@ -61,6 +68,7 @@ class CertificateProfile {
     String? name,
     String? reason,
     String? location,
+    String? contact,
     String? certificatePath,
     Uint8List? signatureBytes,
   }) {
@@ -69,6 +77,7 @@ class CertificateProfile {
       name: name ?? this.name,
       reason: reason ?? this.reason,
       location: location ?? this.location,
+      contact: contact ?? this.contact,
       certificatePath: certificatePath ?? this.certificatePath,
       signatureBytes: signatureBytes ?? this.signatureBytes,
     );
@@ -80,6 +89,7 @@ class CertificateProfile {
       'name': name,
       'reason': reason,
       'location': location,
+      'contact': contact,
       'certificatePath': certificatePath,
       if (signatureBytes.isNotEmpty)
         'signature': base64Encode(signatureBytes),

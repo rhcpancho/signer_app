@@ -232,28 +232,29 @@ class PdfViewerAreaState extends ConsumerState<PdfViewerArea> {
     for (int i = 0; i < session.placements.length; i++) {
       final SignaturePlacement placement = session.placements[i];
       if (placement.pageIndex != pageIndex) continue;
-      final CertificateProfile? profile = profiles
-          .where((p) => p.id == placement.profileId)
-          .firstOrNull;
-      widgets.add(
-        SignatureOverlayItem(
-          key: ValueKey<int>(i),
-          placement: placement,
-          scale: scale,
-          interactive: true,
-          pageSizeInPoints: ui.Size(
-            session.document.pages[pageIndex].width,
-            session.document.pages[pageIndex].height,
+        final CertificateProfile? profile = profiles
+            .where((p) => p.id == placement.profileId)
+            .firstOrNull;
+        widgets.add(
+          SignatureOverlayItem(
+            key: ValueKey<int>(i),
+            placement: placement,
+            scale: scale,
+            interactive: true,
+            // Hover/selected local se resuelve dentro del overlay.
+            pageSizeInPoints: ui.Size(
+              session.document.pages[pageIndex].width,
+              session.document.pages[pageIndex].height,
+            ),
+            profileName: profile?.name,
+            hasRubric: profile?.hasRubric ?? false,
+            rubricBytes: profile?.signatureBytes,
+            onChanged: (Rect rect) =>
+                ref.read(pdfSessionProvider.notifier).updatePlacement(i, rect),
+            onRemove: () =>
+                ref.read(pdfSessionProvider.notifier).removePlacement(i),
           ),
-          profileName: profile?.name,
-          hasRubric: profile?.hasRubric ?? false,
-          rubricBytes: profile?.signatureBytes,
-          onChanged: (Rect rect) =>
-              ref.read(pdfSessionProvider.notifier).updatePlacement(i, rect),
-          onRemove: () =>
-              ref.read(pdfSessionProvider.notifier).removePlacement(i),
-        ),
-      );
+        );
     }
     return widgets;
   }

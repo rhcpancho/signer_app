@@ -62,6 +62,7 @@ class _SignSetupDialogState extends ConsumerState<_SignSetupDialog> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _reasonController = TextEditingController();
   final TextEditingController _locationController = TextEditingController();
+  final TextEditingController _contactController = TextEditingController();
   String? _selectedCertificateId;
   String? _certificatePath;
   String _certificatePassword = '';
@@ -80,6 +81,7 @@ class _SignSetupDialogState extends ConsumerState<_SignSetupDialog> {
     _nameController.dispose();
     _reasonController.dispose();
     _locationController.dispose();
+    _contactController.dispose();
     super.dispose();
   }
 
@@ -107,6 +109,7 @@ class _SignSetupDialogState extends ConsumerState<_SignSetupDialog> {
       _nameController.text = profile.name;
       _reasonController.text = profile.reason;
       _locationController.text = profile.location;
+      _contactController.text = profile.contact;
       _certificatePassword = '';
       _rubrica = profile.hasRubric
           ? Uint8ListImage(bytes: profile.signatureBytes, name: profile.name)
@@ -134,6 +137,7 @@ class _SignSetupDialogState extends ConsumerState<_SignSetupDialog> {
       _nameController.text = subject.isNotEmpty ? subject : name;
       _reasonController.clear();
       _locationController.clear();
+      _contactController.clear();
       _rubrica = null;
     });
   }
@@ -197,6 +201,7 @@ class _SignSetupDialogState extends ConsumerState<_SignSetupDialog> {
             : name,
         reason: _reasonController.text.trim(),
         location: _locationController.text.trim(),
+        contact: _contactController.text.trim(),
         certificatePath: certificatePath,
         signatureBytes: _rubrica?.bytes ?? Uint8List(0),
       );
@@ -319,6 +324,15 @@ class _SignSetupDialogState extends ConsumerState<_SignSetupDialog> {
                 controller: _locationController,
                 decoration: const InputDecoration(
                   labelText: 'Lugar (ej. Caracas, Venezuela)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _contactController,
+                decoration: const InputDecoration(
+                  labelText: 'Contacto (email o teléfono, opcional)',
+                  hintText: 'ej. ana@ejemplo.com',
                   border: OutlineInputBorder(),
                 ),
               ),

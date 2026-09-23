@@ -9,6 +9,7 @@ import 'package:pdfrx/pdfrx.dart';
 import '../models/page_coords.dart';
 import '../models/signature_chain.dart';
 import '../services/pdf_signer_service.dart';
+import 'widgets/signature_frame.dart';
 
 class VerificarFirmaPage extends StatefulWidget {
   const VerificarFirmaPage({
@@ -141,17 +142,28 @@ class _VerificarFirmaPageState extends State<VerificarFirmaPage> {
           );
           final double scaleX = pageRect.width / page.width;
           final double scaleY = pageRect.height / page.height;
+          final String badge = _verifyBadge(field);
+          final Color badgeColor = _verifyBadgeColor(field);
           return <Widget>[
             Positioned(
               left: displayRect.left * scaleX,
               top: displayRect.top * scaleY,
               width: displayRect.width * scaleX,
               height: displayRect.height * scaleY,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.25),
-                  border: Border.all(color: Colors.blue, width: 2),
-                  borderRadius: BorderRadius.circular(2),
+              // Key por índice → remount al cambiar de campo → pulse de entrada.
+              child: TweenAnimationBuilder<double>(
+                key: ValueKey<int>(_selectedIndex ?? -1),
+                tween: Tween<double>(begin: 0.4, end: 1.0),
+                duration: const Duration(milliseconds: 400),
+                curve: Curves.easeOut,
+                builder: (BuildContext context, double opacity, Widget? child) {
+                  return Opacity(opacity: opacity, child: child);
+                },
+                child: SignatureFrame(
+                  style: SignatureFrameStyle.verify,
+                  badge: badge,
+                  badgeColor: badgeColor,
+                  child: const SizedBox.expand(),
                 ),
               ),
             ),
@@ -259,6 +271,8 @@ class _VerificarFirmaPageState extends State<VerificarFirmaPage> {
           _kv('Motivo', field.reason!),
         if (field.locationInfo != null && field.locationInfo!.isNotEmpty)
           _kv('Lugar', field.locationInfo!),
+        if (field.contactInfo != null && field.contactInfo!.isNotEmpty)
+          _kv('Contacto', field.contactInfo!),
         if (field.certSubject != null && field.certSubject!.isNotEmpty)
           _kv('Certificado', field.certSubject!),
         if (field.certIssuer != null && field.certIssuer!.isNotEmpty)
@@ -455,6 +469,21 @@ class _Badge extends StatelessWidget {
       ),
     );
   }
+}
+
+String _verifyBadge(PdfSignatureFieldInfo field) {
+  if (!field.hasSignature) return 'Pendiente';
+  final bool? ok = field.chainInfo?.signatureValidates;
+  if (ok == false) return 'Inválida';
+  if (ok == true) return 'Válida';
+  return 'Firmada';
+}
+
+Color _verifyBadgeColor(PdfSignatureFieldInfo field) {
+  if (!field.hasSignature) return Colors.orange;
+  final bool? ok = field.chainInfo?.signatureValidates;
+  if (ok == false) return Colors.red;
+  return Colors.green;
 }
 
 String _formatDateTime(DateTime date) {

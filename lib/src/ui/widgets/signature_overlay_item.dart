@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../../models/signature_placement.dart';
+import 'signature_frame.dart';
 
 /// Rectángulo ajustable que representa la zona donde se colocará una firma.
 ///
@@ -20,6 +21,7 @@ class SignatureOverlayItem extends StatefulWidget {
     this.profileName,
     this.hasRubric = false,
     this.rubricBytes,
+    this.selected = false,
   });
 
   final SignaturePlacement placement;
@@ -32,6 +34,9 @@ class SignatureOverlayItem extends StatefulWidget {
   final bool hasRubric;
   final Uint8List? rubricBytes;
 
+  /// Zona enfocada en la UI (anillo + handles visibles).
+  final bool selected;
+
   @override
   State<SignatureOverlayItem> createState() => _SignatureOverlayItemState();
 }
@@ -42,6 +47,7 @@ class _SignatureOverlayItemState extends State<SignatureOverlayItem> {
 
   Rect? _startRect;
   Offset? _startPointer;
+  bool _hovered = false;
 
   Rect _clamp(Rect rect) {
     final Size page = widget.pageSizeInPoints;
@@ -65,99 +71,179 @@ class _SignatureOverlayItemState extends State<SignatureOverlayItem> {
     widget.onChanged(_clamp(start.shift(delta)));
   }
 
-  void _onResizeUpdate(DragUpdateDetails details) {
-    final Rect start = _startRect ?? widget.placement.rect;
+  /// Resize anclado a una esquina: mantiene opuesta fija.
+  void _onResizeCorner(DragUpdateDetails details, _Corner corner) {
+    final Rect r = widget.placement.rect;
     final Offset delta = details.delta / widget.scale;
-    final double width =
-        (start.width + delta.dx).clamp(_kMinWidthPt, double.infinity);
-    final double height =
-        (start.height + delta.dy).clamp(_kMinHeightPt, double.infinity);
-    final Rect grown =
-        Rect.fromLTWH(start.left, start.top, width, height);
+    double left = r.left;
+    double top = r.top;
+    double right = r.right;
+    double bottom = r.bottom;
+
+    if (corner == _Corner.bottomRight || corner == _Corner.topRight) {
+      right = (r.right + delta.dx).clamp(r.left + _kMinWidthPt, double.infinity);
+    }
+    if (corner == _Corner.bottomLeft || corner == _Corner.topLeft) {
+      left = (r.left + delta.dx).clamp(0.0, r.right - _kMinWidthPt);
+    }
+    if (corner == _Corner.bottomRight || corner == _Corner.bottomLeft) {
+      bottom =
+          (r.bottom + delta.dy).clamp(r.top + _kMinHeightPt, double.infinity);
+    }
+    if (corner == _Corner.topLeft || corner == _Corner.topRight) {
+      top = (r.top + delta.dy).clamp(0.0, r.bottom - _kMinHeightPt);
+    }
+
     widget.onChanged(
-      _clamp(
-        Rect.fromLTWH(grown.left, grown.top, width, height),
-      ),
+      _clamp(Rect.fromLTRB(left, top, right, bottom)),
     );
+  }
+
+  SignatureFrameStyle get _style {
+    if (widget.placement.signed) return SignatureFrameStyle.signed;
+    if (!widget.interactive) return SignatureFrameStyle.pending;
+    if (widget.selected) return SignatureFrameStyle.selected;
+    if (_hovered) return SignatureFrameStyle.hover;
+    return SignatureFrameStyle.pending;
   }
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
     final Rect rect = widget.placement.rect;
     final bool signed = widget.placement.signed;
-    final Color borderColor = signed ? Colors.green : scheme.primary;
-    final Color fillColor =
-        (signed ? Colors.green : scheme.primary).withOpacity(0.08);
     final bool interactive = widget.interactive && !signed;
+    final bool showChrome = interactive && (_hovered || widget.selected);
+
+    final SignatureFrameStyle style = _style;
+    final Color accent = style == SignatureFrameStyle.signed
+        ? Colors.green
+        : Theme.of(context).colorScheme.primary;
+
+    Widget preview = _buildPreview(accent, signed);
+
+    // Rúbrica se pinta a sangre (sin padding extra del frame) → clipContent.
+    final bool rubricFullBleed =
+        !signed && widget.hasRubric && widget.rubricBytes != null;
 
     return Positioned.fromRect(
       rect: rect * widget.scale,
-      child: GestureDetector(
-        onPanStart: interactive ? _onMoveStart : null,
-        onPanUpdate: interactive ? _onMoveUpdate : null,
-        child: Container(
-          decoration: BoxDecoration(
-            color: fillColor,
-            border: Border.all(color: borderColor, width: 1.5),
-            borderRadius: BorderRadius.circular(2),
-          ),
-          child: CustomPaint(
-            painter: _DashedBorderPainter(color: borderColor),
+      child: MouseRegion(
+        onEnter: (_) => interactive
+            ? setState(() => _hovered = true)
+            : null,
+        onExit: (_) => setState(() => _hovered = false),
+        cursor:
+            interactive ? SystemMouseCursors.move : MouseCursor.defer,
+        child: GestureDetector(
+          onPanStart: interactive ? _onMoveStart : null,
+          onPanUpdate: interactive ? _onMoveUpdate : null,
+          child: SignatureFrame(
+            style: style,
+            elevated: showChrome,
+            clipContent: rubricFullBleed,
+            badge: signed ? 'Firmada' : null,
+            badgeColor: Colors.green,
             child: Stack(
               children: <Widget>[
-                Positioned.fill(
-                  child: Center(
-                    child: _buildPreview(borderColor, signed),
+                Positioned.fill(child: Center(child: preview)),
+                if (showChrome) ...<Widget>[
+                  // Handle esquina sup-izq
+                  _resizeHandle(
+                    corner: _Corner.topLeft,
+                    left: -8,
+                    top: -8,
+                    interactive: interactive,
                   ),
-                ),
-                if (interactive)
+                  // Handle esquina sup-der
+                  _resizeHandle(
+                    corner: _Corner.topRight,
+                    right: -8,
+                    top: -8,
+                    interactive: interactive,
+                  ),
+                  // Handle esquina inf-izq
+                  _resizeHandle(
+                    corner: _Corner.bottomLeft,
+                    left: -8,
+                    bottom: -8,
+                    interactive: interactive,
+                  ),
+                  // Handle esquina inf-der (principal)
+                  _resizeHandle(
+                    corner: _Corner.bottomRight,
+                    right: -8,
+                    bottom: -8,
+                    interactive: interactive,
+                    emphasize: true,
+                  ),
+                  // Cerrar
                   Positioned(
-                    top: 0,
-                    right: 0,
+                    right: -8,
+                    top: -18,
                     child: GestureDetector(
                       onTap: widget.onRemove,
                       child: const Tooltip(
                         message: 'Quitar firma',
-                        child: Padding(
-                          padding: EdgeInsets.all(4),
-                          child: Icon(
-                            Icons.close,
-                            size: 16,
-                            color: Colors.redAccent,
+                        child: Material(
+                          type: MaterialType.circle,
+                          color: Colors.redAccent,
+                          elevation: 2,
+                          child: Padding(
+                            padding: EdgeInsets.all(3),
+                            child: Icon(
+                              Icons.close,
+                              size: 12,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                if (interactive)
-                  Positioned(
-                    right: 0,
-                    bottom: 0,
-                    child: GestureDetector(
-                      onPanStart: (details) {
-                        _startRect = widget.placement.rect;
-                      },
-                      onPanUpdate: _onResizeUpdate,
-                      child: Container(
-                        width: 16,
-                        height: 16,
-                        decoration: BoxDecoration(
-                          color: borderColor,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
-                        ),
-                        child: const Icon(
-                          Icons.open_in_full,
-                          size: 10,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
+                ],
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _resizeHandle({
+    required _Corner corner,
+    required bool interactive,
+    double? left,
+    double? right,
+    double? top,
+    double? bottom,
+    bool emphasize = false,
+  }) {
+    final Color accent = widget.placement.signed
+        ? Colors.green
+        : Theme.of(context).colorScheme.primary;
+    return Positioned(
+      left: left,
+      right: right,
+      top: top,
+      bottom: bottom,
+      child: GestureDetector(
+        onPanUpdate: interactive
+            ? (DragUpdateDetails d) => _onResizeCorner(d, corner)
+            : null,
+        child: Container(
+          width: 14,
+          height: 14,
+          decoration: BoxDecoration(
+            color: accent,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2),
+            boxShadow: <BoxShadow>[
+              BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 3),
+            ],
+          ),
+          child: emphasize
+              ? const Icon(Icons.open_in_full, size: 8, color: Colors.white)
+              : null,
         ),
       ),
     );
@@ -169,10 +255,10 @@ class _SignatureOverlayItemState extends State<SignatureOverlayItem> {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           Icon(Icons.verified, size: 22, color: borderColor),
-          Text(
+          const Text(
             'Firmada',
             style: TextStyle(
-              color: Colors.green.shade700,
+              color: Colors.green,
               fontSize: 11,
               fontWeight: FontWeight.w600,
             ),
@@ -181,15 +267,45 @@ class _SignatureOverlayItemState extends State<SignatureOverlayItem> {
       );
     }
 
-    if (widget.hasRubric && widget.rubricBytes != null && widget.rubricBytes!.isNotEmpty) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(2),
-        child: FittedBox(
+    if (widget.hasRubric &&
+        widget.rubricBytes != null &&
+        widget.rubricBytes!.isNotEmpty) {
+      return FittedBox(
+        fit: BoxFit.contain,
+        child: Image.memory(
+          widget.rubricBytes!,
           fit: BoxFit.contain,
-          child: Image.memory(
-            widget.rubricBytes!,
-            fit: BoxFit.contain,
-          ),
+        ),
+      );
+    }
+
+    final bool wide = widget.placement.rect.width >
+        widget.placement.rect.height * 1.6;
+    final Widget icon = Icon(Icons.draw, size: 20, color: borderColor);
+    final Widget label = Flexible(
+      child: Text(
+        widget.profileName ?? 'Firma',
+        style: TextStyle(
+          color: borderColor,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        ),
+        textAlign: wide ? TextAlign.start : TextAlign.center,
+        overflow: TextOverflow.ellipsis,
+        maxLines: 2,
+      ),
+    );
+
+    if (wide) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            icon,
+            const SizedBox(width: 6),
+            label,
+          ],
         ),
       );
     }
@@ -197,62 +313,15 @@ class _SignatureOverlayItemState extends State<SignatureOverlayItem> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        Icon(Icons.draw, size: 22, color: borderColor),
-        Text(
-          widget.profileName ?? 'Firma',
-          style: TextStyle(
-            color: borderColor,
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-          ),
-          textAlign: TextAlign.center,
-          overflow: TextOverflow.ellipsis,
-        ),
+        icon,
+        const SizedBox(height: 2),
+        label,
       ],
     );
   }
 }
 
-class _DashedBorderPainter extends CustomPainter {
-  _DashedBorderPainter({required this.color});
-
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Paint paint = Paint()
-      ..color = color
-      ..strokeWidth = 1
-      ..style = PaintingStyle.stroke;
-    const double dashWidth = 5;
-    const double dashSpace = 3;
-
-    void drawDashedLine(Offset start, Offset end) {
-      final double total = (end - start).distance;
-      final Offset direction = (end - start) / total;
-      double distance = 0;
-      while (distance < total) {
-        canvas.drawLine(
-          start + direction * distance,
-          start + direction * (distance + dashWidth).clamp(0, total - distance),
-          paint,
-        );
-        distance += dashWidth + dashSpace;
-      }
-    }
-
-    drawDashedLine(Offset.zero, Offset(size.width, 0));
-    drawDashedLine(
-        Offset(size.width, 0), Offset(size.width, size.height));
-    drawDashedLine(
-        Offset(size.width, size.height), Offset(0, size.height));
-    drawDashedLine(Offset(0, size.height), Offset.zero);
-  }
-
-  @override
-  bool shouldRepaint(_DashedBorderPainter oldDelegate) =>
-      oldDelegate.color != color;
-}
+enum _Corner { topLeft, topRight, bottomLeft, bottomRight }
 
 extension on Rect {
   Rect operator *(double scale) =>
