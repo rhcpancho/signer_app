@@ -533,6 +533,15 @@ class _ChainPanel extends StatelessWidget {
     return _MiniChip(label: label, color: color, icon: icon);
   }
 
+  Widget _revocationChip(BuildContext context, RevocationCheck rev) {
+    final String suffix = rev.source == RevocationSource.ocsp
+        ? ' (OCSP)'
+        : rev.source == RevocationSource.crl
+            ? ' (CRL)'
+            : '';
+    return _statusChip(context, 'Revocación$suffix', rev.status.value);
+  }
+
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
@@ -576,8 +585,20 @@ class _ChainPanel extends StatelessWidget {
                   'Cadena',
                   info.chainComplete ? true : false,
                 ),
+                if (info.revocation != null)
+                  _revocationChip(context, info.revocation!),
               ],
             ),
+            if (info.revocation?.note != null) ...<Widget>[
+              const SizedBox(height: 6),
+              Text(
+                'Revocación: ${info.revocation!.note}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
             if (info.signingTime != null) ...<Widget>[
               const SizedBox(height: 6),
               Text(

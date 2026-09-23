@@ -11,6 +11,7 @@ import '../models/certificate_profile.dart';
 import '../models/page_coords.dart';
 import '../models/signature_chain.dart';
 import '../models/signature_placement.dart';
+import 'revocation_service.dart';
 import 'signature_crypto.dart';
 
 /// Describe una firma a aplicar: certificado + zona + contraseña del PFX.
@@ -481,6 +482,15 @@ class PdfSignerService {
           SignatureChainInfo? chainInfo;
           if (hasSignature) {
             chainInfo = SignatureCryptoService().analyseSignature(field, bytes);
+            if (chainInfo != null && chainInfo.chainNodes.isNotEmpty) {
+              try {
+                final RevocationCheck rev =
+                    await RevocationService().checkChain(chainInfo.chainNodes);
+                chainInfo = chainInfo.withRevocation(rev);
+              } catch (_) {
+                // soft-fail: sin revocación no invalidamos
+              }
+            }
           }
           fields.add(PdfSignatureFieldInfo(
             name: field.name,

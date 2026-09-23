@@ -181,6 +181,8 @@ class SignatureCryptoService {
   static const String _kOidSignedData = '1.2.840.113549.1.7.2';
   static const String _kOidMessageDigest = '1.2.840.113549.1.9.4';
   static const String _kOidSigningTime = '1.2.840.113549.1.9.5';
+  static const String _kOidAia = '1.3.6.1.5.5.7.1.1';
+  static const String _kOidCrlDp = '2.5.29.31';
 
   /// DigestIdentifier DER (hex) que espera [RSASigner].
   static const Map<String, String> _kDigestIdentHex = <String, String>{
@@ -567,6 +569,7 @@ class SignatureCryptoService {
     // signature AlgId (skip)
     i++;
     // issuer
+    final int issuerIdx = i;
     final String issuer = _dnToString(t[i]);
     i++;
     // validity
@@ -590,6 +593,8 @@ class SignatureCryptoService {
     List<int>? aki;
     bool isCa = false;
     bool bcPresent = false;
+    final List<String> ocspUrls = <String>[];
+    final List<String> crlUrls = <String>[];
     for (; i < t.length; i++) {
       final ASN1Object el = t[i];
       if (el.tag != _kTagCtx3) continue;
@@ -633,6 +638,10 @@ class SignatureCryptoService {
               aki = Uint8List.fromList(k.valueBytes());
             }
           }
+        } else if (oid == _kOidAia) {
+          _extractOcspUrls(inner, ocspUrls);
+        } else if (oid == _kOidCrlDp) {
+          _extractCrlUrls(inner, crlUrls);
         }
       }
     }
@@ -656,7 +665,73 @@ class SignatureCryptoService {
       ski: ski,
       aki: aki,
       tbs: t,
+      issuerNameDer: Uint8List.fromList(t[issuerIdx].encodedBytes),
+      spkiDer: _tryFindSpkiDer(t),
+      ocspUrls: ocspUrls,
+      crlUrls: crlUrls,
     );
+  }
+
+  static List<int>? _tryFindSpkiDer(List<ASN1Object> tbs) {
+    try {
+      return Uint8List.fromList(_findSpki(tbs).encodedBytes);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// AIA (1.3.6.1.5.5.7.1.1) → URLs de id-ad-ocsp (…48.1).
+  static void _extractOcspUrls(ASN1Object aia, List<String> out) {
+    final List<ASN1Object>? descs = _children(aia);
+    if (descs == null) return;
+    for (final ASN1Object d in descs) {
+      final List<ASN1Object>? p = _children(d);
+      if (p == null || p.length < 2) continue;
+      if (_oidString(p[0]) != '1.3.6.1.5.5.7.48.1') continue;
+      final String? uri = _generalNameUri(p[1]);
+      if (uri != null) out.add(uri);
+    }
+  }
+
+  /// CRL Distribution Points (2.5.29.31) → cualquier URI GeneralName.
+  static void _extractCrlUrls(ASN1Object dpSeq, List<String> out) {
+    final List<ASN1Object>? dps = _children(dpSeq);
+    if (dps == null) return;
+    for (final ASN1Object dp in dps) {
+      _collectUris(dp, out);
+    }
+  }
+
+  static void _collectUris(ASN1Object o, List<String> out) {
+    if (o.tag == 0x86) {
+      // [6] uniformResourceIdentifier
+      try {
+        final String uri = String.fromCharCodes(o.valueBytes());
+        if (uri.startsWith('http')) out.add(uri);
+      } catch (_) {}
+    }
+    final List<ASN1Object>? kids = _children(o);
+    if (kids == null) return;
+    for (final ASN1Object k in kids) {
+      _collectUris(k, out);
+    }
+  }
+
+  static String? _generalNameUri(ASN1Object gn) {
+    if (gn.tag == 0x86) {
+      try {
+        return String.fromCharCodes(gn.valueBytes());
+      } catch (_) {
+        return null;
+      }
+    }
+    final List<ASN1Object>? kids = _children(gn);
+    if (kids == null || kids.isEmpty) return null;
+    for (final ASN1Object k in kids) {
+      final String? u = _generalNameUri(k);
+      if (u != null) return u;
+    }
+    return null;
   }
 
   static bool _basicConstraintsIsCa(ASN1Object inner) {
@@ -811,6 +886,10 @@ class _ParsedCert {
     required this.ski,
     required this.aki,
     required this.tbs,
+    required this.issuerNameDer,
+    this.spkiDer,
+    this.ocspUrls = const <String>[],
+    this.crlUrls = const <String>[],
   });
 
   final Uint8List der;
@@ -825,6 +904,10 @@ class _ParsedCert {
   final List<int>? ski;
   final List<int>? aki;
   final List<ASN1Object> tbs;
+  final List<int> issuerNameDer;
+  final List<int>? spkiDer;
+  final List<String> ocspUrls;
+  final List<String> crlUrls;
 
   CertChainNode toNode(DateTime at) {
     final bool timeOk = validFrom != null &&
@@ -848,6 +931,10 @@ class _ParsedCert {
       rawDer: der,
       subjectKeyIdentifier: ski,
       authorityKeyIdentifier: aki,
+      issuerNameDer: issuerNameDer,
+      spkiDer: spkiDer,
+      ocspUrls: ocspUrls,
+      crlUrls: crlUrls,
     );
   }
 }

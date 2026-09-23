@@ -14,6 +14,40 @@ class CertValidity {
   bool? get $value => value;
 }
 
+/// Origen de la comprobación de revocación.
+enum RevocationSource { ocsp, crl }
+
+/// Resultado de la comprobación de revocación (soft-fail).
+///
+/// `status.unknown` (null) = sin red, sin URLs AIA/CRL o parseo fallido;
+/// nunca invalida la firma por sí solo.
+class RevocationCheck {
+  const RevocationCheck({
+    required this.status,
+    this.source,
+    this.note,
+    this.goodCount = 0,
+    this.revokedCount = 0,
+    this.skippedCount = 0,
+  });
+
+  /// `yes` = todos los nodos comprobados good; `no` = al menos uno revoked;
+  /// `unknown` = no se pudo determinar (offline o sin datos).
+  final CertValidity status;
+
+  final RevocationSource? source;
+  final String? note;
+
+  final int goodCount;
+  final int revokedCount;
+  final int skippedCount;
+
+  static const RevocationCheck unknown = RevocationCheck(
+    status: CertValidity.unknown,
+    note: 'Sin comprobar',
+  );
+}
+
 /// Un nodo de la cadena de certificados (leaf → root).
 class CertChainNode {
   const CertChainNode({
@@ -29,6 +63,10 @@ class CertChainNode {
     required this.rawDer,
     this.subjectKeyIdentifier,
     this.authorityKeyIdentifier,
+    this.issuerNameDer,
+    this.spkiDer,
+    this.ocspUrls = const <String>[],
+    this.crlUrls = const <String>[],
   });
 
   /// Subject DN legible (CN prioritario).
@@ -59,6 +97,18 @@ class CertChainNode {
 
   final List<int>? subjectKeyIdentifier;
   final List<int>? authorityKeyIdentifier;
+
+  /// DER del campo issuer (Name) del propio cert — para OCSP issuerNameHash.
+  final List<int>? issuerNameDer;
+
+  /// DER completo del SubjectPublicKeyInfo — para extraer la clave emisora.
+  final List<int>? spkiDer;
+
+  /// URLs AIA → OCSP (id-ad-ocsp).
+  final List<String> ocspUrls;
+
+  /// URLs CRL Distribution Points.
+  final List<String> crlUrls;
 }
 
 /// Resultado del análisis de una firma CMS/PKCS#7 embebida en un PDF.
@@ -72,6 +122,7 @@ class SignatureChainInfo {
     required this.digestAlgorithmOid,
     required this.signatureAlgorithmOid,
     required this.signingTime,
+    this.revocation,
     this.error,
   });
 
@@ -94,11 +145,29 @@ class SignatureChainInfo {
   final String? signatureAlgorithmOid;
   final DateTime? signingTime;
 
+  /// Resultado OCSP/CRL (soft-fail; null = aún no comprobado).
+  final RevocationCheck? revocation;
+
   /// Mensaje de error no fatal (parseo parcial, algoritmo soportado…).
   final String? error;
 
   /// Atajo para la UI: `signatureValidates` o fallback a integridad.
   bool get analysed => signatureValidates != null || documentIntegrityOk != null;
+
+  SignatureChainInfo withRevocation(RevocationCheck check) {
+    return SignatureChainInfo(
+      documentIntegrityOk: documentIntegrityOk,
+      signatureCryptographicOk: signatureCryptographicOk,
+      signatureValidates: signatureValidates,
+      chainComplete: chainComplete,
+      chainNodes: chainNodes,
+      digestAlgorithmOid: digestAlgorithmOid,
+      signatureAlgorithmOid: signatureAlgorithmOid,
+      signingTime: signingTime,
+      revocation: check,
+      error: error,
+    );
+  }
 
   static const SignatureChainInfo empty = SignatureChainInfo(
     documentIntegrityOk: null,
@@ -109,5 +178,6 @@ class SignatureChainInfo {
     digestAlgorithmOid: null,
     signatureAlgorithmOid: null,
     signingTime: null,
+    revocation: null,
   );
 }
