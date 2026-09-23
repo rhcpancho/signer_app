@@ -71,15 +71,20 @@ Future<(Uint8List, Rect)> _signAndReadBounds({
 
 void main() {
   group('Round-trip placement display → field.bounds sin rotación', () {
-    test('rotación 0: bounds coinciden con el placement', () async {
+    test('rotación 0: ancho/posición del placement, alto del contenido', () async {
       const Rect rect = Rect.fromLTWH(50, 60, 220, 96);
       final (_, Rect bounds) = await _signAndReadBounds(
         placementRect: rect,
       );
+      // Rúbrica 1×1: alto = ancho + inset (4), no el alto del placement.
+      final double contentH = PdfSignerService.contentHeightForRubric(
+        width: rect.width,
+        image: base64Decode(_kPng1x1),
+      );
       expect(bounds.left, closeTo(rect.left, 0.5));
       expect(bounds.top, closeTo(rect.top, 0.5));
       expect(bounds.width, closeTo(rect.width, 0.5));
-      expect(bounds.height, closeTo(rect.height, 0.5));
+      expect(bounds.height, closeTo(contentH, 0.5));
     });
   });
 
@@ -108,8 +113,19 @@ void main() {
         expect(actualRotation, rotation,
             reason: 'El PDF de prueba debe tener /Rotate persistido');
 
+        // Alto adaptado al contenido (rúbrica 1×1) en espacio display.
+        final double contentH = PdfSignerService.contentHeightForRubric(
+          width: displayRect.width,
+          image: base64Decode(_kPng1x1),
+        );
+        final Rect fittedDisplay = Rect.fromLTWH(
+          displayRect.left,
+          displayRect.top,
+          displayRect.width,
+          contentH,
+        );
         final Rect expected = PageCoords.displayToUnrotated(
-          rect: displayRect,
+          rect: fittedDisplay,
           unrotatedSize: unrot,
           rotationDegrees: rotation.index * 90,
         );
