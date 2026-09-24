@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:signer_app/src/models/certificate_profile.dart';
 import 'package:signer_app/src/models/signature_placement.dart';
 import 'package:signer_app/src/services/pdf_signer_service.dart';
@@ -247,6 +249,81 @@ void main() {
       expect(field.bounds.top, greaterThanOrEqualTo(-0.5));
       expect(field.bounds.height, greaterThan(0));
       signed.dispose();
+    });
+  });
+
+  group('rutas de salida y sobrescritura', () {
+    late Directory tempDir;
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('signer_save_');
+    });
+
+    tearDown(() {
+      if (tempDir.existsSync()) {
+        tempDir.deleteSync(recursive: true);
+      }
+    });
+
+    test('intendedOutputPath usa X_firmado.pdf junto al original', () {
+      final String source = p.join(tempDir.path, 'contrato.pdf');
+      final String intended =
+          PdfSignerService().intendedOutputPath(source);
+      expect(intended, p.join(tempDir.path, 'contrato_firmado.pdf'));
+    });
+
+    test('intendedOutputPath respeta outputDirectory', () {
+      final String source = p.join(tempDir.path, 'contrato.pdf');
+      final String outDir = p.join(tempDir.path, 'salida');
+      final String intended = PdfSignerService()
+          .intendedOutputPath(source, outputDirectory: outDir);
+      expect(intended, p.join(outDir, 'contrato_firmado.pdf'));
+    });
+
+    test('nextAvailablePath devuelve la propia ruta si no existe', () {
+      final String path = p.join(tempDir.path, 'nuevo_firmado.pdf');
+      expect(PdfSignerService().nextAvailablePath(path), path);
+    });
+
+    test('nextAvailablePath numera _2, _3 si ya existe', () {
+      final String base = p.join(tempDir.path, 'doc_firmado.pdf');
+      File(base).writeAsStringSync('x');
+      final PdfSignerService service = PdfSignerService();
+
+      final String second = service.nextAvailablePath(base);
+      expect(second, p.join(tempDir.path, 'doc_firmado_2.pdf'));
+      File(second).writeAsStringSync('x');
+
+      final String third = service.nextAvailablePath(base);
+      expect(third, p.join(tempDir.path, 'doc_firmado_3.pdf'));
+    });
+
+    test('save con outputPath escribe en esa ruta exacta', () async {
+      final String source = p.join(tempDir.path, 'informe.pdf');
+      final String alt =
+          p.join(tempDir.path, 'informe_firmado_2.pdf');
+      final File saved = await PdfSignerService()
+          .save(Uint8List.fromList(<int>[1, 2, 3]), source,
+              outputPath: alt);
+      expect(saved.path, alt);
+      expect(File(alt).readAsBytesSync(), equals(<int>[1, 2, 3]));
+      // No crea el path por defecto.
+      expect(
+        File(p.join(tempDir.path, 'informe_firmado.pdf')).existsSync(),
+        isFalse,
+      );
+    });
+
+    test('save sin outputPath crea X_firmado.pdf por defecto', () async {
+      final String source = p.join(tempDir.path, 'acta.pdf');
+      final File saved = await PdfSignerService()
+          .save(Uint8List.fromList(<int>[9]), source);
+      expect(
+        saved.path,
+        p.join(tempDir.path, 'acta_firmado.pdf'),
+      );
+      expect(File(p.join(tempDir.path, 'acta_firmado.pdf')).existsSync(),
+          isTrue);
     });
   });
 }

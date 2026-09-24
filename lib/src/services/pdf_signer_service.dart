@@ -837,16 +837,48 @@ class PdfSignerService {
     }
   }
 
+  /// Ruta donde [save] escribiría por defecto: `X_firmado.pdf` junto al original
+  /// (o en [outputDirectory] si se indica).
+  String intendedOutputPath(String sourcePath, {String? outputDirectory}) {
+    final String directory = outputDirectory ?? p.dirname(sourcePath);
+    final String base = _outputBaseName(sourcePath);
+    return p.join(directory, '${base}_firmado.pdf');
+  }
+
+  /// Siguiente ruta libre si [intendedPath] ya existe:
+  /// `X_firmado_2.pdf`, `X_firmado_3.pdf`, ...
+  String nextAvailablePath(String intendedPath) {
+    if (!File(intendedPath).existsSync()) return intendedPath;
+    final String dir = p.dirname(intendedPath);
+    final String filename = p.basenameWithoutExtension(intendedPath);
+    final String ext = p.extension(intendedPath);
+    int n = 2;
+    while (true) {
+      final String candidate = p.join(dir, '${filename}_$n$ext');
+      if (!File(candidate).existsSync()) return candidate;
+      n++;
+    }
+  }
+
+  String _outputBaseName(String sourcePath) {
+    final String name = sourcePath.split(RegExp(r'[\\/]')).last;
+    return name.toLowerCase().endsWith('.pdf')
+        ? name.replaceFirst(RegExp(r'\.pdf$', caseSensitive: false), '')
+        : name;
+  }
+
   /// Guarda el PDF firmado junto al original como `X_firmado.pdf`.
   /// Si se especifica [outputDirectory], guarda ahí en lugar del directorio original.
-  Future<File> save(Uint8List bytes, String sourcePath, {String? outputDirectory}) async {
-    final String directory = outputDirectory ?? p.dirname(sourcePath);
-    final String base =
-        sourcePath.split(RegExp(r'[\\/]')).last.toLowerCase().endsWith('.pdf')
-            ? sourcePath.split(RegExp(r'[\\/]')).last.replaceFirst(RegExp(r'\.pdf$', caseSensitive: false), '')
-            : sourcePath.split(RegExp(r'[\\/]')).last;
-
-    final File output = File(p.join(directory, '${base}_firmado.pdf'));
+  /// Si se especifica [outputPath], se usa esa ruta exacta (tiene prioridad).
+  Future<File> save(
+    Uint8List bytes,
+    String sourcePath, {
+    String? outputDirectory,
+    String? outputPath,
+  }) async {
+    final String path = outputPath ??
+        intendedOutputPath(sourcePath, outputDirectory: outputDirectory);
+    final File output = File(path);
     await output.writeAsBytes(bytes, flush: true);
     return output;
   }

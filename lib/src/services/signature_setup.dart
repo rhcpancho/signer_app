@@ -41,17 +41,25 @@ class SignSetup {
 }
 
 /// Abre el diálogo para elegir/crear un certificado y su rúbrica opcional.
+///
+/// Si se pasa [initialCertificatePath], se precarga ese PFX/P12 (p. ej. al
+/// arrastrar un `.pfx` sobre la ventana).
 Future<SignSetup?> showSignSetupDialog(
-  BuildContext context,
-) {
+  BuildContext context, {
+  String? initialCertificatePath,
+}) {
   return showDialog<SignSetup>(
     context: context,
-    builder: (BuildContext context) => const _SignSetupDialog(),
+    builder: (BuildContext context) => _SignSetupDialog(
+      initialCertificatePath: initialCertificatePath,
+    ),
   );
 }
 
 class _SignSetupDialog extends ConsumerStatefulWidget {
-  const _SignSetupDialog();
+  const _SignSetupDialog({this.initialCertificatePath});
+
+  final String? initialCertificatePath;
 
   @override
   ConsumerState<_SignSetupDialog> createState() => _SignSetupDialogState();
@@ -78,7 +86,12 @@ class _SignSetupDialogState extends ConsumerState<_SignSetupDialog> {
   @override
   void initState() {
     super.initState();
-    _preselectLastUsed();
+    final String? initialPath = widget.initialCertificatePath;
+    if (initialPath != null) {
+      _loadCertificatePath(initialPath);
+    } else {
+      _preselectLastUsed();
+    }
   }
 
   @override
@@ -129,19 +142,24 @@ class _SignSetupDialogState extends ConsumerState<_SignSetupDialog> {
   Future<void> _pickCertificate() async {
     final PickedFile? picked = await FileService().pickCertificate();
     if (picked == null) return;
-    final String name = picked.path
+    _loadCertificatePath(picked.path);
+  }
+
+  /// Precarga un PFX/P12 en el diálogo (file picker o drag & drop).
+  void _loadCertificatePath(String path) {
+    final String name = path
         .split(RegExp(r'[\\/]'))
         .last
         .replaceFirst(RegExp(r'\.(pfx|p12)$', caseSensitive: false), '');
     String subject = '';
     final String subjectWithEmpty =
-        PdfSignerService().certificateSubject(picked.path, '');
+        PdfSignerService().certificateSubject(path, '');
     if (subjectWithEmpty.isNotEmpty) {
       subject = subjectWithEmpty;
     }
     setState(() {
       _selectedCertificateId = _kNewCertificateId;
-      _certificatePath = picked.path;
+      _certificatePath = path;
       _certificatePassword = '';
       _nameController.text = subject.isNotEmpty ? subject : name;
       _reasonController.clear();

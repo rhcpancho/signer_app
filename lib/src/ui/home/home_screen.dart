@@ -15,8 +15,11 @@ import '../../services/tsa_service.dart';
 import '../../core/theme_provider.dart';
 import '../verificar_firma_page.dart';
 import '../widgets/drop_zone_overlay.dart';
+import '../widgets/tsa_status_badge.dart';
 import 'batch_progress_page.dart';
 import 'batch_setup_dialog.dart';
+import 'open_password_dialog.dart';
+import 'overwrite_save_dialog.dart';
 import 'page_selector_dialog.dart';
 import 'pdf_session.dart';
 import 'pdf_viewer_area.dart';
@@ -244,17 +247,75 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (picked == null || !mounted) return;
     setState(() => _opening = true);
     try {
-      final PdfDocument document = await PdfDocument.openData(picked.bytes);
-      await ref.read(pdfSessionProvider.notifier).load(
-        document,
-        picked.path,
-        picked.bytes,
-      );
-      ref.read(activeSignContextProvider.notifier).state = null;
+      await _openPdfBytes(picked.bytes, picked.path);
     } catch (e) {
       if (mounted) _showSnack('No se pudo abrir el PDF: $e');
     } finally {
       if (mounted) setState(() => _opening = false);
+    }
+  }
+
+  /// Abre [bytes] pidiendo contraseña si el PDF está cifrado y avisa si ya
+  /// tiene firmas existentes.
+  Future<void> _openPdfBytes(Uint8List bytes, String path) async {
+    final ({PdfDocument document, String? password})? opened =
+        await _openDocumentWithPassword(bytes);
+    if (opened == null || !mounted) return;
+
+    await ref.read(pdfSessionProvider.notifier).load(
+      opened.document,
+      path,
+      bytes,
+      openPassword: opened.password,
+    );
+    ref.read(activeSignContextProvider.notifier).state = null;
+    await _inspectExistingSignatures(bytes, opened.password);
+  }
+
+  /// Abre el PDF; si pdfrx lanza [PdfPasswordException], pide la contraseña
+  /// en un diálogo y reintenta (hasta cancelar).
+  Future<({PdfDocument document, String? password})?>
+      _openDocumentWithPassword(Uint8List bytes) async {
+    String? password;
+    while (true) {
+      try {
+        final PdfDocument document = password == null
+            ? await PdfDocument.openData(bytes)
+            : await PdfDocument.openData(
+                bytes,
+                passwordProvider: createOneTimePasswordProvider(password),
+              );
+        return (document: document, password: password);
+      } on PdfPasswordException {
+        if (!mounted) return null;
+        final String? next = await showOpenPasswordDialog(context);
+        if (next == null) return null;
+        password = next;
+      }
+    }
+  }
+
+  /// Guarda `existingSignedFields` y muestra un snackbar si el PDF ya está firmado.
+  Future<void> _inspectExistingSignatures(
+    Uint8List bytes,
+    String? openPassword,
+  ) async {
+    try {
+      final PdfSignatureReport report = await PdfSignerService()
+          .inspectFields(bytes, openPassword: openPassword);
+      if (!mounted) return;
+      ref
+          .read(pdfSessionProvider.notifier)
+          .setExistingSignedFields(report.signed);
+      if (report.signed > 0) {
+        _showSnack(
+          'Este PDF ya tiene ${report.signed} firma'
+          '${report.signed == 1 ? '' : 's'} existente'
+          '${report.signed == 1 ? '' : 's'}.',
+        );
+      }
+    } catch (_) {
+      // soft-fail: la inspección no debe impedir abrir el PDF.
     }
   }
 
@@ -405,6 +466,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     if (confirmed != true || !mounted) return;
 
+    // Evitar sobrescritura silenciosa de X_firmado.pdf (antes de firmar).
+    final PdfSignerService service = PdfSignerService();
+    final String intended = service.intendedOutputPath(session.sourcePath);
+    String outputPath = intended;
+    if (File(intended).existsSync()) {
+      final OverwriteDecision? decision = await showOverwriteSaveDialog(
+        context,
+        path: intended,
+      );
+      if (!mounted) return;
+      if (decision == null || decision.choice == OverwriteChoice.cancel) {
+        return;
+      }
+      if (decision.choice == OverwriteChoice.rename) {
+        outputPath = service.nextAvailablePath(intended);
+      }
+    }
+
     setState(() => _signing = true);
     try {
       final List<SignRequest> requests = <SignRequest>[
@@ -416,31 +495,37 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
       ];
 
-      final PdfSignerService service = PdfSignerService();
       final Uint8List bytes = await service.sign(
         inputBytes: session.sourceBytes,
         requests: requests,
         openPassword: session.openPassword,
       );
+
       final File output = await service.save(
         bytes,
         session.sourcePath,
+        outputPath: outputPath,
       );
       // TSA soft-fail: si el perfil lo pide, sella el PDF final y guarda
       // el token en un sidecar `.tsr`; si falla, la firma ya está completa.
+      TsaResult? tsaResult;
+      bool tsaFailed = false;
       if (ctx.profile.useTsa) {
         try {
           final TsaService tsa = TsaService();
-          final TsaResult? result = await tsa.timestamp(
+          tsaResult = await tsa.timestamp(
             data: bytes,
             url: ctx.profile.tsaUrl,
           );
-          if (result != null) {
+          if (tsaResult != null) {
             final File sidecar = File('${output.path}.tsr');
-            await sidecar.writeAsBytes(result.token, flush: true);
+            await sidecar.writeAsBytes(tsaResult.token, flush: true);
+          } else {
+            tsaFailed = true;
           }
         } catch (_) {
           // soft-fail: no invalida la firma
+          tsaFailed = true;
         }
       }
       ref.read(pdfSessionProvider.notifier).markAllSigned();
@@ -450,6 +535,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         count: pending.length,
         profileName: ctx.profile.name,
         signedPlacements: pending,
+        tsaRequested: ctx.profile.useTsa,
+        tsaResult: tsaResult,
+        tsaFailed: tsaFailed,
       );
     } catch (e) {
       if (mounted) _showSnack('Error al firmar: $e');
@@ -463,9 +551,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     required int count,
     required String profileName,
     required List<SignaturePlacement> signedPlacements,
+    required bool tsaRequested,
+    TsaResult? tsaResult,
+    required bool tsaFailed,
   }) {
     final Set<int> pages = signedPlacements.map((p) => p.pageIndex + 1).toSet()
       ..toList().sort();
+    final TsaStatus tsaStatus = !tsaRequested
+        ? TsaStatus.notRequested
+        : (tsaResult != null ? TsaStatus.granted : TsaStatus.failed);
     return showDialog<void>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
@@ -488,6 +582,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 'Páginas: ${pages.join(', ')}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
+              if (tsaRequested) ...<Widget>[
+                const SizedBox(height: 8),
+                TsaStatusBadge(status: tsaStatus, result: tsaResult),
+              ],
               const SizedBox(height: 8),
               Text(
                 'Guardado en:',
@@ -709,13 +807,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (picked == null || !mounted) return;
     setState(() => _opening = true);
     try {
-      final PdfDocument document = await PdfDocument.openData(picked.bytes);
-      await ref.read(pdfSessionProvider.notifier).load(
-        document,
-        picked.path,
-        picked.bytes,
-      );
-      ref.read(activeSignContextProvider.notifier).state = null;
+      await _openPdfBytes(picked.bytes, picked.path);
     } catch (e) {
       if (mounted) _showSnack('No se pudo abrir el PDF: $e');
     } finally {
@@ -766,7 +858,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final PickedFile? picked = await FileService.fromDroppedPath(path);
     if (picked == null || !mounted) return;
 
-    final SignSetup? setup = await showSignSetupDialog(context);
+    final SignSetup? setup = await showSignSetupDialog(
+      context,
+      initialCertificatePath: picked.path,
+    );
     if (setup == null || !mounted) return;
 
     _showSnack('Certificado importado: ${setup.profile.name}');

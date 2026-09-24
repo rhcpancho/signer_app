@@ -1,6 +1,8 @@
 import 'dart:typed_data';
 
 import '../models/certificate_profile.dart';
+import '../services/tsa_service.dart';
+import '../ui/widgets/tsa_status_badge.dart';
 
 /// Zona de colocación de la firma en el PDF.
 enum BatchPlacementZone {
@@ -61,11 +63,19 @@ class BatchFileResult {
     required this.path,
     required this.status,
     this.errorMessage,
+    this.tsaStatus = TsaStatus.notRequested,
+    this.tsaResult,
   });
 
   final String path;
   final BatchFileStatus status;
   final String? errorMessage;
+
+  /// Estado TSA de este archivo (granted/failed si el perfil lo pidió).
+  final TsaStatus tsaStatus;
+
+  /// Token TSA si se concedió.
+  final TsaResult? tsaResult;
 
   String get fileName => path.split(RegExp(r'[\\/]')).last;
 }

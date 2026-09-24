@@ -8,6 +8,8 @@ import '../../models/batch_job.dart';
 import '../../models/signature_placement.dart';
 import '../../services/pdf_signer_service.dart';
 import '../../services/tsa_service.dart';
+import '../widgets/tsa_status_badge.dart';
+import 'overwrite_save_dialog.dart';
 
 /// Página de progreso y resumen de un lote de firmas.
 class BatchProgressPage extends StatefulWidget {
@@ -24,6 +26,10 @@ class _BatchProgressPageState extends State<BatchProgressPage> {
   int _currentIndex = 0;
   bool _cancelled = false;
   bool _done = false;
+
+  /// Decisión de sobrescritura aplicable al resto del lote (si el usuario
+  /// marcó «Aplicar a todo»).
+  OverwriteChoice? _batchOverwriteChoice;
 
   List<BatchFileItem> get _activeFiles =>
       widget.config.files.where((f) => f.selected).toList();
@@ -83,21 +89,66 @@ class _BatchProgressPageState extends State<BatchProgressPage> {
             ),
           ],
         );
+
+        // Evitar sobrescritura silenciosa de X_firmado.pdf.
+        final String intended = service.intendedOutputPath(
+          file.path,
+          outputDirectory: widget.config.outputDirectory,
+        );
+        String outputPath = intended;
+        if (File(intended).existsSync()) {
+          OverwriteChoice choice =
+              _batchOverwriteChoice ?? OverwriteChoice.cancel;
+          if (_batchOverwriteChoice == null) {
+            if (!mounted) return;
+            final OverwriteDecision? decision = await showOverwriteSaveDialog(
+              context,
+              path: intended,
+              showApplyToAll: true,
+            );
+            if (!mounted) return;
+            if (decision == null ||
+                decision.choice == OverwriteChoice.cancel) {
+              setState(() {
+                _results.add(BatchFileResult(
+                  path: file.path,
+                  status: BatchFileStatus.skipped,
+                  errorMessage: 'Cancelado: el archivo de salida ya existe.',
+                ));
+              });
+              continue;
+            }
+            choice = decision.choice;
+            if (decision.applyToAll) {
+              _batchOverwriteChoice = choice;
+            }
+          }
+          if (choice == OverwriteChoice.rename) {
+            outputPath = service.nextAvailablePath(intended);
+          }
+        }
+
         final File saved = await service.save(signed, file.path,
-            outputDirectory: widget.config.outputDirectory);
+            outputPath: outputPath);
         // TSA soft-fail: sidecar .tsr junto al PDF firmado del lote.
+        TsaResult? tsaResult;
+        TsaStatus tsaStatus = TsaStatus.notRequested;
         if (widget.config.profile.useTsa) {
           try {
-            final TsaResult? tsa = await TsaService().timestamp(
+            tsaResult = await TsaService().timestamp(
               data: signed,
               url: widget.config.profile.tsaUrl,
             );
-            if (tsa != null) {
+            if (tsaResult != null) {
               await File('${saved.path}.tsr')
-                  .writeAsBytes(tsa.token, flush: true);
+                  .writeAsBytes(tsaResult.token, flush: true);
+              tsaStatus = TsaStatus.granted;
+            } else {
+              tsaStatus = TsaStatus.failed;
             }
           } catch (_) {
             // soft-fail
+            tsaStatus = TsaStatus.failed;
           }
         }
 
@@ -105,6 +156,8 @@ class _BatchProgressPageState extends State<BatchProgressPage> {
           _results.add(BatchFileResult(
             path: file.path,
             status: BatchFileStatus.done,
+            tsaStatus: tsaStatus,
+            tsaResult: tsaResult,
           ));
         });
       } catch (e) {
@@ -405,11 +458,26 @@ class _ResultTile extends StatelessWidget {
         style: const TextStyle(fontSize: 13),
         overflow: TextOverflow.ellipsis,
       ),
-      subtitle: Text(
-        statusText,
-        style: TextStyle(color: statusColor, fontSize: 11),
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          if (statusText.isNotEmpty)
+            Text(
+              statusText,
+              style: TextStyle(color: statusColor, fontSize: 11),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          if (result.tsaStatus != TsaStatus.notRequested) ...<Widget>[
+            const SizedBox(height: 2),
+            TsaStatusBadge(
+              status: result.tsaStatus,
+              result: result.tsaResult,
+              dense: true,
+            ),
+          ],
+        ],
       ),
     );
   }

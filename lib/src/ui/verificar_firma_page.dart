@@ -11,6 +11,7 @@ import '../models/signature_chain.dart';
 import '../services/pdf_signer_service.dart';
 import '../services/tsa_service.dart';
 import 'widgets/signature_frame.dart';
+import 'widgets/tsa_status_badge.dart';
 
 class VerificarFirmaPage extends StatefulWidget {
   const VerificarFirmaPage({
@@ -314,7 +315,10 @@ class _VerificarFirmaPageState extends State<VerificarFirmaPage> {
           ),
         if (_tsaSidecar != null) ...<Widget>[
           const SizedBox(height: 8),
-          _TsaChip(result: _tsaSidecar!),
+          TsaStatusBadge(
+            status: TsaStatus.granted,
+            result: _tsaSidecar,
+          ),
         ],
         const SizedBox(height: 16),
         FilledButton.tonalIcon(
@@ -790,26 +794,6 @@ class _MiniChip extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-/// Chip de sello de tiempo RFC 3161 leído del sidecar `.tsr`.
-class _TsaChip extends StatelessWidget {
-  const _TsaChip({required this.result});
-
-  final TsaResult result;
-
-  @override
-  Widget build(BuildContext context) {
-    final String when =
-        result.genTime != null ? _formatDateTime(result.genTime!) : 'ok';
-    final String who =
-        result.tsaName != null ? ' · ${result.tsaName}' : '';
-    return _MiniChip(
-      label: 'TSA $when$who',
-      color: Colors.green,
-      icon: Icons.schedule,
     );
   }
 }
